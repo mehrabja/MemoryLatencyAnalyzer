@@ -5,6 +5,7 @@
 #include "evaluation_lab.hpp"
 #include "operational_lab.hpp"
 #include "latency_measurer.hpp"
+#include "mlc_compare.hpp"
 #include "platform_utils.hpp"
 #include "reporter.hpp"
 #include "settings.hpp"
@@ -102,6 +103,42 @@ bool consume_size_mib(
     target = mib * static_cast<std::size_t>(1024) *
              static_cast<std::size_t>(1024);
     return true;
+}
+
+bool parse_delay_list(
+    std::string_view text,
+    std::vector<std::uint64_t>& delays) {
+    if (text.empty()) return false;
+
+    delays.clear();
+    std::size_t begin = 0;
+    while (begin <= text.size()) {
+        const std::size_t comma = text.find(',', begin);
+        const std::size_t end =
+            comma == std::string_view::npos
+                ? text.size()
+                : comma;
+        if (begin == end) return false;
+
+        const std::string_view token =
+            text.substr(begin, end - begin);
+        std::uint64_t value = 0;
+        const auto [ptr, ec] = std::from_chars(
+            token.data(),
+            token.data() + token.size(),
+            value);
+        if (ec != std::errc{} ||
+            ptr != token.data() + token.size()) {
+            return false;
+        }
+
+        delays.push_back(value);
+
+        if (comma == std::string_view::npos) break;
+        begin = comma + 1U;
+    }
+
+    return !delays.empty();
 }
 
 } // namespace
@@ -269,9 +306,68 @@ int main(int argc, char* argv[]) {
         (run_phase5_lab && phase5_runs <= 0) ||
         (run_cpu_capability && compute_seconds <= 0) ||
         (run_evaluation_lab && (evaluation_runs <= 0 || trace_samples <= 0 || trace_average <= 0)) ||
-        (run_operational_lab && operational_runs <= 0)) {
+        (run_operational_lab && operational_runs <= 0) ||
+        (run_mlc_compare && mlc_delays.empty())) {
         std::cerr << "Invalid numeric configuration\n";
         return 2;
+    }
+
+    if (run_mlc_compare) {
+        const allowed_cpus = PlatformUtils::allowed_cpus();
+        if (allowed_cpus.empty()) {
+            std::cerr
+                << "MLC comparison unavailable: no allowed CPU was found\n";
+            return 1;
+        }
+
+        const int primary_cpu = allowed_cpus.front();
+        if (!PlatformUtils::pin_current_thread(primary_cpu) && !quiet) {
+            std::cerr
+                << "[warning] CPU affinity could not be set for MLC latency thread\n";
+        }
+
+        const auto report =
+            MlcComparison::run(
+                allowed_cpus,
+                primary_cpu,
+                mlc_buffer_size,
+                mlc_load_size,
+                iterations,
+                rounds,
+                mlc_delays,
+                mlc_csv_file,
+                mlc_json_file);
+
+        std::cout
+            << "Intel MLC Comparison\n"
+            << "MLC: "
+            << (report.available
+                    ? report.binary
+                    : "unavailable")
+            << "\n"
+            << "Version: " << report.version << '\n'
+            << "Points: " << report.results.size() << '\n'
+            << "CSV: " << report.csv_path << '\n'
+            << "JSON: " << report.json_path << '\n';
+
+        for (const auto& point : report.results) {
+            std::cout
+                << "  " << point.scenario
+                << " delay=" << point.delay_cycles
+                << " cycles: ours=" << point.ours_ns
+                << " ns, MLC=" << point.mlc_ns
+                << " ns, delta=" << point.absolute_delta_ns
+                << " ns (" << point.percent_delta
+                << "%), status=" << point.status << '\n';
+        }
+
+        if (!report.diagnostic.empty()) {
+            std::cout
+                << "Diagnostic: "
+                << report.diagnostic << '\n';
+        }
+
+        return report.report_written ? 0 : 1;
     }
 
     if (run_operational_lab) {

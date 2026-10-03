@@ -155,15 +155,15 @@ double regularized_incomplete_beta(
         static_cast<long double>(x);
 
     const long double log_beta =
-        std::lgammal(a_ld + b_ld) -
+        std::lgamma(a_ld + b_ld) -
         std::lgammal(a_ld) -
         std::lgammal(b_ld);
 
     const long double front =
-        std::expl(
+        std::exp(
             log_beta +
             a_ld * std::log(x_ld) +
-            b_ld * std::log1pl(-x_ld));
+            b_ld * std::log1p(-x_ld));
 
     long double value = 0.0L;
     if (x_ld < (a_ld + 1.0L) /
@@ -574,10 +574,20 @@ bool write_report(
     }
     out << "  ],\n";
 
-    out << "  \"tvla_clean_reference\": {\n";
+    out << "  \"tvla_clean\": {\n";
     out << "    \"t_statistic\": "
-        << result.tvla.threshold << ",\n";
-    out << "    \"p_value\": 0.0\n";
+        << result.tvla_clean.t_statistic << ",\n";
+    out << "    \"abs_t\": "
+        << result.tvla_clean.abs_t << ",\n";
+    out << "    \"welch_satterthwaite_df\": "
+        << result.tvla_clean.degrees_of_freedom << ",\n";
+    out << "    \"p_value\": "
+        << result.tvla_clean.p_value << ",\n";
+    out << "    \"cohen_d\": "
+        << result.tvla_clean.cohen_d << ",\n";
+    out << "    \"reference_threshold_exceeded\": "
+        << (result.tvla_clean.threshold_exceeded ? "true" : "false")
+        << "\n";
     out << "  },\n";
 
     out << "  \"acceptance_criteria\": {\n";
@@ -860,14 +870,15 @@ BootstrapSummary bootstrap_ci(
 
 double snr_linear(
     const std::vector<double>& first,
-    const std::vector<double>& second) {
+    const std::vector<double>& second,
+    OutlierMethod method) {
     const auto a = robust_metrics(
         first,
-        OutlierMethod::MAD,
+        method,
         3.5);
     const auto b = robust_metrics(
         second,
-        OutlierMethod::MAD,
+        method,
         3.5);
 
     if (a.kept_count < 2U || b.kept_count < 2U) {
@@ -1439,23 +1450,6 @@ EvaluationLabResult EvaluationLab::run(
     result.fixed_iqr_metrics = fixed_iqr;
     result.random_iqr_metrics = random_iqr;
 
-    result.fixed_outliers = {
-        robust_metrics_internal(
-            fixed_all,
-            OutlierMethod::MAD,
-            3.5,
-            0U,
-            0U).rejected_count,
-        robust_metrics_internal(
-            fixed_all,
-            OutlierMethod::MAD,
-            3.5,
-            0U,
-            0U).rejected_percent,
-        fixed_iqr.rejected_count,
-        fixed_iqr.rejected_percent
-    };
-
     const auto fixed_mad =
         robust_metrics_internal(
             fixed_all,
@@ -1487,7 +1481,8 @@ EvaluationLabResult EvaluationLab::run(
     result.snr_linear =
         Evaluation::snr_linear(
             fixed_all,
-            random_all);
+            random_all,
+            outlier_method);
     result.snr_db =
         result.snr_linear > 0.0
             ? 20.0 * std::log10(
@@ -1519,6 +1514,7 @@ EvaluationLabResult EvaluationLab::run(
         Evaluation::welch_tvla(
             fixed_clean,
             random_clean);
+    result.tvla_clean = tvla_clean;
 
     result.tvla.adjusted_p_value =
         result.tvla.p_value;

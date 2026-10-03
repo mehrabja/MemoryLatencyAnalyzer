@@ -160,6 +160,7 @@ int run_numa_matrix(
     }
 
     const double nan = std::numeric_limits<double>::quiet_NaN();
+    const std::size_t matrix_size = nodes.size();
     const std::vector<std::vector<double>> latency_ns(
         initiators.size(),
         std::vector<double>(matrix_size, nan));

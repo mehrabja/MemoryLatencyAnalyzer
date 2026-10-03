@@ -83,29 +83,62 @@ __attribute__((noinline))
 #endif
 CpuComputeResult run_compute(double seconds) {
     using clock = std::chrono::steady_clock;
-    volatile double f0 = 1.000001;
-    volatile double f1 = 1.000003;
-    volatile std::uint64_t i0 = 0x9E3779B97F4A7C15ULL;
-    volatile std::uint64_t i1 = 0xD1B54A32D192ED03ULL;
 
-    constexpr std::size_t kBatch = 8;
-    constexpr double kFlopsPerBatch = 16.0;
-    constexpr double kIntOpsPerBatch = 16.0;
+    double f0 = 1.000001;
+    double f1 = 1.000003;
+    double f2 = 1.000005;
+    double f3 = 1.000007;
+    double f4 = 1.000009;
+    double f5 = 1.000011;
+    double f6 = 1.000013;
+    double f7 = 1.000015;
 
-    std::uint64_t batches = 0;
+    std::uint64_t i0 = 0x9E3779B97F4A7C15ULL;
+    std::uint64_t i1 = 0xD1B54A32D192ED03ULL;
+    std::uint64_t i2 = 0x94D049BB133111EBULL;
+    std::uint64_t i3 = 0xBF58476D1CE4E5B9ULL;
+    std::uint64_t i4 = 0x369DEA0F31A53F85ULL;
+    std::uint64_t i5 = 0x2545F4914F6CDD1DULL;
+    std::uint64_t i6 = 0xD2B74407B1CE6E93ULL;
+    std::uint64_t i7 = 0xA4093822299F31D0ULL;
+
+    constexpr std::size_t kRounds = 4;
+    constexpr double kFlopsPerRound = 16.0;
+    constexpr double kIntOpsPerRound = 16.0;
+
+    std::uint64_t rounds = 0;
     const auto start = clock::now();
     const auto deadline =
         start + std::chrono::duration<double>(seconds);
 
     while (clock::now() < deadline) {
-        for (std::size_t j = 0; j < kBatch; ++j) {
-            f0 = f0 * f1 + 1.0000001;
-            f1 = f1 * f0 + 1.0000003;
+        for (std::size_t j = 0; j < kRounds; ++j) {
+            f0 = f0 * 1.0000001 + 0.0000003;
+            f1 = f1 * 1.0000002 + 0.0000005;
+            f2 = f2 * 1.0000003 + 0.0000007;
+            f3 = f3 * 1.0000004 + 0.0000009;
+            f4 = f4 * 1.0000005 + 0.0000011;
+            f5 = f5 * 1.0000006 + 0.0000013;
+            f6 = f6 * 1.0000007 + 0.0000015;
+            f7 = f7 * 1.0000008 + 0.0000017;
+
             i0 = i0 * 2862933555777941757ULL + i1;
-            i1 = i1 * 3202034522624059733ULL + i0;
+            i1 = i1 * 3202034522624059733ULL + i2;
+            i2 = i2 * 3935559000370003845ULL + i3;
+            i3 = i3 * 2691343689449507681ULL + i4;
+            i4 = i4 * 11400714819323198485ULL + i5;
+            i5 = i5 * 7046029254386353131ULL + i6;
+            i6 = i6 * 6364136223846793005ULL + i7;
+            i7 = i7 * 1442695040888963407ULL + i0;
         }
-        ++batches;
+        rounds += static_cast<std::uint64_t>(kRounds);
     }
+
+    volatile double fp_sink = f0 + f1 + f2 + f3 + f4 + f5 + f6 + f7;
+    volatile std::uint64_t int_sink =
+        i0 ^ i1 ^ i2 ^ i3 ^ i4 ^ i5 ^ i6 ^ i7;
+    (void)fp_sink;
+    (void)int_sink;
 
     const auto end = clock::now();
     const double elapsed =
@@ -113,11 +146,11 @@ CpuComputeResult run_compute(double seconds) {
 
     if (elapsed <= 0.0) return {};
 
-    const double batch_count = static_cast<double>(batches);
+    const double round_count = static_cast<double>(rounds);
     return CpuComputeResult{
         elapsed,
-        (batch_count * kFlopsPerBatch) / elapsed / 1e9,
-        (batch_count * kIntOpsPerBatch) / elapsed / 1e9
+        (round_count * kFlopsPerRound) / elapsed / 1e9,
+        (round_count * kIntOpsPerRound) / elapsed / 1e9
     };
 }
 

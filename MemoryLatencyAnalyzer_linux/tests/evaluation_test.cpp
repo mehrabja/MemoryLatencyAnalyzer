@@ -88,7 +88,7 @@ int main() {
     const std::vector<double> effect_b{2.0, 3.0, 4.0};
     expect_near(
         Evaluation::cohen_d(effect_a, effect_b),
-        -1.0 / std::sqrt(2.5 / 1.0),
+        -1.0,
         1e-12);
 
     const auto known_tvla =

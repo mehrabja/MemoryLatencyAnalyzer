@@ -49,6 +49,8 @@ struct EvaluationLabResult {
     int runs = 0;
     int trace_samples = 0;
     int averaging_window = 0;
+    int simulated_capture_faults = 0;
+    int recovered_captures = 0;
 
     std::size_t aligned_samples = 0;
     double alignment_loss_percent = 0.0;

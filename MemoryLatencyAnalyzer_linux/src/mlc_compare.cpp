@@ -395,6 +395,16 @@ bool write_reports(
         << json_escape(report.version) << "\",\n"
         << "    \"diagnostic\": \""
         << json_escape(report.diagnostic) << "\",\n"
+        << "    \"primary_cpu\": "
+        << report.primary_cpu << ",\n"
+        << "    \"latency_buffer_bytes\": "
+        << report.latency_buffer_bytes << ",\n"
+        << "    \"total_load_bytes\": "
+        << report.total_load_bytes << ",\n"
+        << "    \"load_worker_count\": "
+        << report.load_worker_count << ",\n"
+        << "    \"numa_policy\": \""
+        << json_escape(report.numa_policy) << "\",\n"
         << "    \"prefetcher_control\": "
            "\"disabled_by_-e\",\n"
         << "    \"results\": [\n";
@@ -534,6 +544,11 @@ MlcComparisonReport MlcComparison::run(
     const std::string& json_path) {
     MlcComparisonReport report;
     report.binary = find_mlc();
+    report.primary_cpu = primary_cpu;
+    report.latency_buffer_bytes = buffer_bytes;
+    report.total_load_bytes = total_load_bytes;
+    report.numa_policy =
+        "OS default first-touch policy; no explicit NUMA binding";
 
     if (report.binary.empty()) {
         report.diagnostic =
@@ -601,37 +616,67 @@ MlcComparisonReport MlcComparison::run(
 
             const auto cpus =
                 worker_cpus(allowed_cpus, primary_cpu);
-            std::atomic<bool> stop{false};
-            volatile std::uint64_t sink = 0;
-            std::vector<Worker> workers;
-
-            if (!cpus.empty()) {
-                const std::size_t per_worker =
-                    std::max(
-                        1U * kMiB,
-                        total_load_bytes / cpus.size());
-
-                workers.reserve(cpus.size());
-                for (const int cpu : cpus) {
-                    Worker worker;
-                    worker.thread = std::thread(
-                        load_worker,
-                        per_worker,
-                        cpu,
-                        std::ref(stop),
-                        std::ref(sink));
-                    workers.push_back(std::move(worker));
-                }
-            }
+            report.load_worker_count = cpus.size();
 
             RingBuffer loaded_ring(buffer_bytes);
+            const std::size_t samples =
+                static_cast<std::size_t>(
+                    std::max(1, iterations)) *
+                static_cast<std::size_t>(
+                    std::max(1, rounds));
+
             for (const auto delay : delays_cycles) {
+                std::optional<double> mlc_latency =
+                    std::nullopt;
+                int mlc_exit_code = -1;
+                std::string mlc_output;
+
+                const std::string delay_arg =
+                    "-d" + std::to_string(delay);
+                const auto mlc_loaded =
+                    run_process(
+                        report.binary,
+                        {"-e", "--loaded_latency", delay_arg});
+                mlc_exit_code = mlc_loaded.exit_code;
+                mlc_output = mlc_loaded.output;
+                mlc_latency =
+                    parse_loaded_latency_ns(
+                        mlc_output, delay);
+
+                std::atomic<bool> stop{false};
+                volatile std::uint64_t sink = 0;
+                std::vector<Worker> workers;
+                if (!cpus.empty()) {
+                    const std::size_t per_worker =
+                        std::max(
+                            kMiB,
+                            total_load_bytes / cpus.size());
+                    workers.reserve(cpus.size());
+                    for (const int cpu : cpus) {
+                        Worker worker;
+                        worker.thread = std::thread(
+                            load_worker,
+                            per_worker,
+                            cpu,
+                            std::ref(stop),
+                            std::ref(sink));
+                        workers.push_back(std::move(worker));
+                    }
+                }
+
                 const double ours_cycles =
                     measure_ring_latency(
                         loaded_ring,
                         samples,
                         delay,
                         overhead);
+
+                stop.store(true, std::memory_order_relaxed);
+                for (auto& worker : workers) {
+                    if (worker.thread.joinable()) {
+                        worker.thread.join();
+                    }
+                }
                 MlcComparisonPoint loaded;
                 loaded.scenario = "loaded";
                 loaded.delay_cycles = delay;
@@ -642,18 +687,8 @@ MlcComparisonReport MlcComparison::run(
                         Config::TSC_CALIBRATION_ROUNDS,
                         Config::TSC_CALIBRATION_MS);
 
-                const std::string delay_arg =
-                    "-d" + std::to_string(delay);
-                const auto mlc_loaded =
-                    run_process(
-                        report.binary,
-                        {"-e", "--loaded_latency", delay_arg});
-                const auto parsed_loaded =
-                    parse_loaded_latency_ns(
-                        mlc_loaded.output, delay);
-
-                if (parsed_loaded) {
-                    loaded.mlc_ns = *parsed_loaded;
+                if (mlc_latency) {
+                    loaded.mlc_ns = *mlc_latency;
                     loaded.absolute_delta_ns =
                         loaded.ours_ns - loaded.mlc_ns;
                     loaded.percent_delta =
@@ -663,27 +698,18 @@ MlcComparisonReport MlcComparison::run(
                               loaded.absolute_delta_ns /
                               loaded.mlc_ns;
                     loaded.status =
-                        mlc_loaded.exit_code == 0
+                        mlc_exit_code == 0
                             ? "ok"
                             : "mlc-command-warning";
                 } else {
                     loaded.status =
-                        mlc_loaded.exit_code == 0
+                        mlc_exit_code == 0
                             ? "mlc-parse-failed"
                             : "mlc-command-failed";
                 }
 
                 report.results.push_back(loaded);
             }
-
-            stop.store(true, std::memory_order_relaxed);
-            for (auto& worker : workers) {
-                if (worker.thread.joinable()) {
-                    worker.thread.join();
-                }
-            }
-
-            (void)sink;
         } catch (const std::exception& ex) {
             report.diagnostic =
                 std::string("MLC comparison setup/measurement failed: ") +

@@ -335,7 +335,8 @@ std::vector<MeasurementResult> LatencyMeasurer::measure_strides(
             "Stride " + std::to_string(stride) +
                 " B (dependent pointer chase)",
             Statistics::summarize(samples),
-            timer_overhead_cycles_
+            timer_overhead_cycles_,
+            stop_pmu(pmu, pmu_started)
         });
     }
 

@@ -531,6 +531,17 @@ int main(int argc, char* argv[]) {
                 allowed_cpus);
         }
 
+        std::unique_ptr<PmuCounters> pmu;
+        if (enable_pmu) {
+            std::string pmu_error;
+            pmu = PmuCounters::create(pmu_error);
+            if (!pmu) {
+                std::cerr
+                    << "[warning] PMU unavailable: "
+                    << pmu_error << '\n';
+            }
+        }
+
         LatencyMeasurer latency(buffer_size, line_size);
         std::vector<MeasurementResult> latency_results;
 
@@ -541,15 +552,15 @@ int main(int argc, char* argv[]) {
 
         latency_results.push_back(
             latency.measure_hit(
-                iterations, warmup, rounds));
+                iterations, warmup, rounds, pmu.get()));
 
         latency_results.push_back(
             latency.measure_forced_miss(
-                iterations, warmup, rounds));
+                iterations, warmup, rounds, pmu.get()));
 
         latency_results.push_back(
             latency.measure_store(
-                iterations, warmup, rounds));
+                iterations, warmup, rounds, pmu.get()));
 
         const std::vector<std::size_t> strides{
             64, 256, 1024, 4096, 16384
@@ -564,7 +575,8 @@ int main(int argc, char* argv[]) {
                 strides,
                 stride_iterations,
                 stride_warmup,
-                rounds);
+                rounds,
+                pmu.get());
 
         latency_results.insert(
             latency_results.end(),

@@ -1,5 +1,6 @@
 #include "reporter.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <fstream>
@@ -8,6 +9,130 @@
 #include <sstream>
 
 namespace {
+
+const PmuCounterValue* find_pmu(
+    const PmuSnapshot& snapshot,
+    const std::string& name) {
+    const auto it = std::find_if(
+        snapshot.counters.begin(),
+        snapshot.counters.end(),
+        [&name](const PmuCounterValue& value) {
+            return value.name == name;
+        });
+    return it == snapshot.counters.end() ? nullptr : &(*it);
+}
+
+void print_pmu(
+    const PmuSnapshot& snapshot,
+    std::size_t sample_count,
+    double mean_tsc_cycles,
+    bool show_tsc_ratio) {
+    if (!snapshot.valid) {
+        std::cout
+            << "  PMU: unavailable"
+            << (snapshot.error.empty() ? "" : " (" + snapshot.error + ")")
+            << '\n';
+        return;
+    }
+
+    std::cout
+        << "  PMU raw counts:";
+    for (const auto& counter : snapshot.counters) {
+        std::cout
+            << ' ' << counter.name
+            << '=' << counter.raw_count;
+    }
+    std::cout << '\n';
+
+    std::cout
+        << "  PMU scaled counts:";
+    for (const auto& counter : snapshot.counters) {
+        std::cout
+            << ' ' << counter.name
+            << '=' << counter.scaled_count;
+    }
+    std::cout << '\n';
+
+    const auto* cycles = find_pmu(snapshot, "cpu-cycles");
+    const auto* instructions =
+        find_pmu(snapshot, "instructions-retired");
+    const auto* l1d_misses =
+        find_pmu(snapshot, "L1D-load-misses");
+    const auto* llc_refs =
+        find_pmu(snapshot, "LLC-loads");
+    const auto* llc_misses =
+        find_pmu(snapshot, "LLC-load-misses");
+    const auto* stalled =
+        find_pmu(snapshot, "stalled-cycles-backend");
+
+    if (instructions && instructions->scaled_count != 0U) {
+        if (l1d_misses) {
+            std::cout
+                << "  L1D misses/KI: "
+                << (1000.0 *
+                    static_cast<double>(l1d_misses->scaled_count) /
+                    static_cast<double>(instructions->scaled_count));
+        } else {
+            std::cout << "  L1D misses/KI: N/A";
+        }
+
+        if (llc_misses) {
+            std::cout
+                << " | LLC misses/KI: "
+                << (1000.0 *
+                    static_cast<double>(llc_misses->scaled_count) /
+                    static_cast<double>(instructions->scaled_count));
+        } else {
+            std::cout << " | LLC misses/KI: N/A";
+        }
+        std::cout << '\n';
+    }
+
+    if (llc_refs && llc_refs->scaled_count != 0U && llc_misses) {
+        std::cout
+            << "  LLC miss rate: "
+            << (100.0 *
+                static_cast<double>(llc_misses->scaled_count) /
+                static_cast<double>(llc_refs->scaled_count))
+            << "%\n";
+    } else {
+        std::cout << "  LLC miss rate: N/A\n";
+    }
+
+    if (cycles && instructions && instructions->scaled_count != 0U) {
+        std::cout
+            << "  cycles/instruction: "
+            << (static_cast<double>(cycles->scaled_count) /
+                static_cast<double>(instructions->scaled_count))
+            << '\n';
+    } else {
+        std::cout << "  cycles/instruction: N/A\n";
+    }
+
+    if (cycles && stalled && cycles->scaled_count != 0U) {
+        std::cout
+            << "  backend stalled-cycle fraction: "
+            << (static_cast<double>(stalled->scaled_count) /
+                static_cast<double>(cycles->scaled_count))
+            << '\n';
+    } else {
+        std::cout << "  backend stalled-cycle fraction: N/A\n";
+    }
+
+    if (show_tsc_ratio &&
+        cycles &&
+        sample_count != 0U &&
+        mean_tsc_cycles > 0.0) {
+        const double expected_cycles =
+            mean_tsc_cycles *
+            static_cast<double>(sample_count);
+        std::cout
+            << "  PMU CPU-cycles / TSC-reference cycles: "
+            << (static_cast<double>(cycles->scaled_count) /
+                expected_cycles)
+            << '\n';
+    }
+}
 
 double cycles_to_ns(double cycles, double tsc_hz) {
     if (tsc_hz <= 0.0) return 0.0;
@@ -84,6 +209,14 @@ void Reporter::print_latency(
                 << "  stddev : " << s.stddev << " cycles\n"
                 << "  min/max: " << s.min << " / "
                 << s.max << " cycles\n";
+
+            if (result.pmu) {
+                print_pmu(
+                    *result.pmu,
+                    s.count,
+                    s.mean,
+                    true);
+            }
         }
 
         std::cout

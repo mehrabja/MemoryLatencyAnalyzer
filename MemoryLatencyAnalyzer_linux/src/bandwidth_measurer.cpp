@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -17,6 +18,14 @@
 #endif
 
 namespace {
+
+std::optional<PmuSnapshot> stop_pmu(
+    PmuCounters* pmu,
+    bool started) {
+    if (!pmu || !started) return std::nullopt;
+    (void)pmu->stop();
+    return pmu->snapshot();
+}
 
 struct Allocation {
     char* ptr = nullptr;
@@ -99,7 +108,8 @@ double gib_per_second(std::size_t bytes, std::uint64_t elapsed_ns) {
 BandwidthResult BandwidthMeasurer::measure(
     std::size_t size_bytes,
     const std::string& method,
-    int repeats) {
+    int repeats,
+    PmuCounters* pmu) {
     if (size_bytes == 0 || repeats <= 0) {
         throw std::invalid_argument(
             "Bandwidth size and repeats must be positive");
@@ -128,8 +138,13 @@ BandwidthResult BandwidthMeasurer::measure(
     write_rates.reserve(static_cast<std::size_t>(repeats));
     copy_rates.reserve(static_cast<std::size_t>(repeats));
 
+    std::optional<PmuSnapshot> pmu_read;
+    std::optional<PmuSnapshot> pmu_write;
+    std::optional<PmuSnapshot> pmu_copy;
+
+    bool pmu_started = pmu != nullptr && pmu->start();
     for (int r = 0; r < repeats; ++r) {
-        std::uint64_t t0 = Timer::monotonic_raw_ns();
+        const std::uint64_t t0 = Timer::monotonic_raw_ns();
 
         for (std::size_t i = 0;
              i < size_bytes;
@@ -140,19 +155,28 @@ BandwidthResult BandwidthMeasurer::measure(
         const std::uint64_t read_ns =
             Timer::monotonic_raw_ns() - t0;
         read_rates.push_back(gib_per_second(size_bytes, read_ns));
+    }
+    pmu_read = stop_pmu(pmu, pmu_started);
 
-        t0 = Timer::monotonic_raw_ns();
+    pmu_started = pmu != nullptr && pmu->start();
+    for (int r = 0; r < repeats; ++r) {
+        const std::uint64_t t0 = Timer::monotonic_raw_ns();
         std::memset(dst.ptr, 0x55, size_bytes);
         const std::uint64_t write_ns =
             Timer::monotonic_raw_ns() - t0;
         write_rates.push_back(gib_per_second(size_bytes, write_ns));
+    }
+    pmu_write = stop_pmu(pmu, pmu_started);
 
-        t0 = Timer::monotonic_raw_ns();
+    pmu_started = pmu != nullptr && pmu->start();
+    for (int r = 0; r < repeats; ++r) {
+        const std::uint64_t t0 = Timer::monotonic_raw_ns();
         std::memcpy(dst.ptr, src.ptr, size_bytes);
         const std::uint64_t copy_ns =
             Timer::monotonic_raw_ns() - t0;
         copy_rates.push_back(gib_per_second(size_bytes, copy_ns));
     }
+    pmu_copy = stop_pmu(pmu, pmu_started);
 
     (void)checksum;
 
@@ -161,7 +185,10 @@ BandwidthResult BandwidthMeasurer::measure(
         size_bytes,
         median(std::move(read_rates)),
         median(std::move(write_rates)),
-        median(std::move(copy_rates))
+        median(std::move(copy_rates)),
+        std::move(pmu_read),
+        std::move(pmu_write),
+        std::move(pmu_copy)
     };
 
     release_buffer(src);

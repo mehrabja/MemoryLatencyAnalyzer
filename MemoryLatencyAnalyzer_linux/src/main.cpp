@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cstddef>
+#include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -110,6 +111,8 @@ bool consume_size_mib(
 
 } // namespace
 
+namespace {
+
 int first_allowed_cpu_for_node(
     int node_id,
     const std::vector<int>& allowed_cpus) {
@@ -157,8 +160,7 @@ int run_numa_matrix(
     }
 
     const double nan = std::numeric_limits<double>::quiet_NaN();
-    const std::size_t matrix_size = nodes.size();
-    std::vector<std::vector<double>> latency_ns(
+    const std::vector<std::vector<double>> latency_ns(
         initiators.size(),
         std::vector<double>(matrix_size, nan));
     std::vector<std::vector<double>> bandwidth_gibs(
@@ -265,6 +267,8 @@ int run_numa_matrix(
 
     return 0;
 }
+
+} // namespace
 
 int main(int argc, char* argv[]) {
     int rounds = Config::DEFAULT_ROUNDS;
@@ -429,6 +433,12 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    if (numa_node >= 0 && run_numa_matrix_mode) {
+        std::cerr
+            << "--numa-node and --numa-matrix are mutually exclusive\n";
+        return 2;
+    }
+
     if (rounds <= 0 ||
         iterations <= 0 ||
         warmup < 0 ||
@@ -438,13 +448,7 @@ int main(int argc, char* argv[]) {
         (run_phase5_lab && phase5_runs <= 0) ||
         (run_cpu_capability && compute_seconds <= 0) ||
         (run_evaluation_lab && (evaluation_runs <= 0 || trace_samples <= 0 || trace_average <= 0)) ||
-        (run_operational_lab && operational_runs <= 0) ||
-        (numa_node >= 0 && run_numa_matrix_mode)) {
-        if (numa_node >= 0 && run_numa_matrix_mode) {
-            std::cerr
-                << "--numa-node and --numa-matrix are mutually exclusive\n";
-            return 2;
-        }
+        (run_operational_lab && operational_runs <= 0)) {
         std::cerr << "Invalid numeric configuration\n";
         return 2;
     }

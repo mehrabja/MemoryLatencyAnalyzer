@@ -227,6 +227,11 @@ SpectreResult read_byte_with_threshold(
         tries);
 }
 
+SpectreResult retry_if_uncertain(
+    std::size_t malicious_x,
+    int tries,
+    std::uint64_t threshold);
+
 std::string read_string_impl(
     std::size_t start_offset,
     std::size_t length,

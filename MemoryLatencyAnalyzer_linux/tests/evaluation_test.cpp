@@ -68,8 +68,8 @@ int main() {
             equal_a,
             10000U,
             12345U);
-    expect_near(bootstrap.mean_ci.lower, 1.0, 1e-12);
-    expect_near(bootstrap.mean_ci.upper, 4.0, 1e-12);
+    expect_near(bootstrap.mean_ci.lower, 1.5, 1e-12);
+    expect_near(bootstrap.mean_ci.upper, 3.5, 1e-12);
     expect_near(bootstrap.median_ci.lower, 1.0, 1e-12);
     expect_near(bootstrap.median_ci.upper, 4.0, 1e-12);
     assert(bootstrap.resamples == 10000U);

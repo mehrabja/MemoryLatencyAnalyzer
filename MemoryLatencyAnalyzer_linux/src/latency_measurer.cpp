@@ -7,8 +7,21 @@
 #include <random>
 #include <stdexcept>
 #include <vector>
+#include <optional>
 
 #include <sys/mman.h>
+
+namespace {
+
+std::optional<PmuSnapshot> stop_pmu(
+    PmuCounters* pmu,
+    bool started) {
+    if (!pmu || !started) return std::nullopt;
+    (void)pmu->stop();
+    return pmu->snapshot();
+}
+
+} // namespace
 
 LatencyMeasurer::LatencyMeasurer(std::size_t requested_buffer_size,
                                  std::size_t cache_line_size)
@@ -152,9 +165,11 @@ void LatencyMeasurer::flush_random_path(std::size_t start_position,
     Timer::clflush_fence();
 }
 
-MeasurementResult LatencyMeasurer::measure_hit(int iterations,
-                                               int warmup,
-                                               int rounds) {
+MeasurementResult LatencyMeasurer::measure_hit(
+    int iterations,
+    int warmup,
+    int rounds,
+    PmuCounters* pmu) {
     if (iterations <= 0 || warmup < 0 || rounds <= 0) {
         throw std::invalid_argument("Invalid hit benchmark configuration");
     }
@@ -170,6 +185,9 @@ MeasurementResult LatencyMeasurer::measure_hit(int iterations,
     samples.reserve(static_cast<std::size_t>(iterations) *
                     static_cast<std::size_t>(rounds));
 
+    const bool pmu_started =
+        pmu != nullptr && pmu->start();
+
     for (int round = 0; round < rounds; ++round) {
         for (int i = 0; i < iterations; ++i) {
             samples.push_back(
@@ -180,13 +198,16 @@ MeasurementResult LatencyMeasurer::measure_hit(int iterations,
     return MeasurementResult{
         "Cache Hit (L1 pointer-chasing latency)",
         Statistics::summarize(samples),
-        timer_overhead_cycles_
+        timer_overhead_cycles_,
+        stop_pmu(pmu, pmu_started)
     };
 }
 
-MeasurementResult LatencyMeasurer::measure_forced_miss(int iterations,
-                                                       int warmup,
-                                                       int rounds) {
+MeasurementResult LatencyMeasurer::measure_forced_miss(
+    int iterations,
+    int warmup,
+    int rounds,
+    PmuCounters* pmu) {
     if (iterations <= 0 || warmup < 0 || rounds <= 0 || node_count_ < 64) {
         throw std::invalid_argument("Invalid forced-miss benchmark configuration");
     }
@@ -204,6 +225,9 @@ MeasurementResult LatencyMeasurer::measure_forced_miss(int iterations,
     std::vector<double> samples;
     samples.reserve(static_cast<std::size_t>(iterations) *
                     static_cast<std::size_t>(rounds));
+
+    const bool pmu_started =
+        pmu != nullptr && pmu->start();
 
     for (int round = 0; round < rounds; ++round) {
         for (int i = 0; i < iterations; ++i) {
@@ -223,13 +247,16 @@ MeasurementResult LatencyMeasurer::measure_forced_miss(int iterations,
     return MeasurementResult{
         "Forced Cache Miss (random pointer chase + CLFLUSH)",
         Statistics::summarize(samples),
-        timer_overhead_cycles_
+        timer_overhead_cycles_,
+        stop_pmu(pmu, pmu_started)
     };
 }
 
-MeasurementResult LatencyMeasurer::measure_store(int iterations,
-                                                 int warmup,
-                                                 int rounds) {
+MeasurementResult LatencyMeasurer::measure_store(
+    int iterations,
+    int warmup,
+    int rounds,
+    PmuCounters* pmu) {
     if (iterations <= 0 || warmup < 0 || rounds <= 0) {
         throw std::invalid_argument("Invalid store benchmark configuration");
     }
@@ -242,6 +269,9 @@ MeasurementResult LatencyMeasurer::measure_store(int iterations,
     samples.reserve(static_cast<std::size_t>(iterations) *
                     static_cast<std::size_t>(rounds));
 
+    const bool pmu_started =
+        pmu != nullptr && pmu->start();
+
     for (int round = 0; round < rounds; ++round) {
         for (int i = 0; i < iterations; ++i) {
             samples.push_back(timed_store_batch(kStoreBatch));
@@ -251,7 +281,8 @@ MeasurementResult LatencyMeasurer::measure_store(int iterations,
     return MeasurementResult{
         "Store (hot lines; issue throughput per store)",
         Statistics::summarize(samples),
-        timer_overhead_cycles_
+        timer_overhead_cycles_,
+        stop_pmu(pmu, pmu_started)
     };
 }
 
@@ -259,7 +290,8 @@ std::vector<MeasurementResult> LatencyMeasurer::measure_strides(
     const std::vector<std::size_t>& strides,
     int iterations,
     int warmup,
-    int rounds) {
+    int rounds,
+    PmuCounters* pmu) {
     if (iterations <= 0 || warmup < 0 || rounds <= 0) {
         throw std::invalid_argument("Invalid stride benchmark configuration");
     }
@@ -283,6 +315,9 @@ std::vector<MeasurementResult> LatencyMeasurer::measure_strides(
         std::vector<double> samples;
         samples.reserve(static_cast<std::size_t>(iterations) *
                         static_cast<std::size_t>(rounds));
+
+        const bool pmu_started =
+            pmu != nullptr && pmu->start();
 
         for (int round = 0; round < rounds; ++round) {
             Node* current = &buffer_[

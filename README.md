@@ -215,110 +215,87 @@ Restricted containers or hosted environments may reject affinity or priority cha
 
 ---
 
-## Evaluation & validation lab
+## Command line
 
-The evaluation layer is a separate local harness for making measurements more repeatable and for documenting the experimental reference boundary. It implements alignment, denoising, outlier control, SNR/error metrics, TVLA, recovery checks, platform fingerprints, and synthetic control evaluation.
+~~~text
+Usage: latency_analyzer [options]
 
-Run:
+Latency:
+  --rounds N             Independent measurement rounds (default 5)
+  --iterations N         Samples per round (default 1000)
+  --warmup N             Warmup samples (default 150)
+  --buffer-mib N         Latency buffer size in MiB (default 32)
 
-~~~bash
-./latency_analyzer --evaluation-lab
-./latency_analyzer --evaluation-lab --evaluation-runs 5 --trace-samples 4096 --trace-average 4
+Bandwidth:
+  --bandwidth-mib N      Bandwidth buffer size in MiB (default 64)
+  --no-bandwidth         Skip bandwidth measurements
+
+Shared memory:
+  --shm-iterations N     Cross-process round trips (default 2000)
+  --no-shared-memory     Skip the shared-memory test
+
+Output:
+  --csv FILE             Write latency, bandwidth, and shared-memory results
+  --quiet                Minimal output
+  --verbose              Include p95/p99/stddev/min/max
+
+Other:
+  --spectre              Run the self-contained Spectre V1 demo and exit
+  --spectre-tries N      Attempts per leaked byte (default 999)
+  --spectre-lab          Repeat the self-contained Spectre demo for reliability analysis
+  --lab-runs N           Independent Spectre lab runs (default 5)
+  --phase5-lab           Run the Phase 5 defensive lab and exit
+  --phase5-runs N        Independent Phase 5 lab runs (default 5)
+  --cpu-capability       Detect CPU and run compute-capacity benchmark
+  --compute-seconds N    CPU benchmark duration in seconds (default 1)
+  --help                 Show this help
 ~~~
 
-The pipeline performs:
+Examples:
 
-1. **Sample alignment** — paired classes are truncated to a common sample count before statistical comparison.
-2. **Block averaging** — adjacent timing observations can be averaged to reduce short-term noise.
-3. **MAD outlier rejection** — median absolute deviation is used instead of a mean/stddev rule so a few large excursions do not dominate the result.
-4. **SNR** — reports the absolute difference between class means relative to pooled timing noise.
-5. **Error rate** — evaluates a simple threshold classifier against the known fixed/random labels.
-6. **TVLA** — runs a single-point Welch two-sample t-test and reports `|t|` against the API's reference threshold of 4.5.
-7. **Repeatability** — computes the coefficient of variation across per-run medians.
-8. **Recovery** — the lab injects one synthetic incomplete-capture fault, exercises the local retry/recovery path, and reports recovery rate.
-9. **Platform fingerprint** — records CPU brand/vendor, core topology, machine architecture, and kernel release.
-
-### Operational control evaluation
-
-The operational lab remains a synthetic state machine. It now covers a broader lifecycle:
-
-- initial target access
-- host and process discovery
-- credential-access attempt
-- privilege-escalation attempt
-- scheduled/persistent execution
-- process-injection indicator
-- defense-tamper indicator
-- command-and-control pattern
-- lateral-movement attempt
-- sensitive collection
-- archive/collection indicator
-- data staging
-- data transfer / exfiltration
-- cleanup/recovery
-
-Each synthetic scenario records an expected control, telemetry source, expected defensive action, detection result, and recovery result.
-
-This is **emulation, not implementation of the underlying offensive technique**. The lab uses an in-memory event model only. It does not create sockets, establish C2, modify privileges, install persistence, inject into processes, access credentials, access external memory, or transfer real data.
-
-The resulting JSON is suitable as a ground-truth fixture for evaluating a real security product later, but a real EDR/DLP/firewall/SIEM is not exercised by this code.
+~~~bash
+./latency_analyzer
+./latency_analyzer --rounds 10 --iterations 5000 --verbose
+./latency_analyzer --buffer-mib 128 --bandwidth-mib 256
+./latency_analyzer --no-bandwidth --no-shared-memory
+./latency_analyzer --csv results.csv
+./latency_analyzer --spectre
+~~~
 
 ---
 
-## CPU capability profiler
+## Build
 
-A separate CPU profiling mode detects the processor identity and measures a short single-thread compute workload.
+Requirements:
 
-Run:
+- Linux
+- x86/x86-64 CPU
+- CMake 3.15+
+- C++17 compiler
+- pthread support
 
-~~~bash
-./latency_analyzer --cpu-capability
-./latency_analyzer --cpu-capability --compute-seconds 3
-~~~
-
-It reports:
-
-- CPU vendor and full brand/model string
-- CPUID family, model, and stepping
-- physical cores, logical threads, packages, and SMT state
-- detected SSE/SSE2/SSE4.2/AVX/AVX2/AVX-512F support
-- available maximum-frequency information
-- measured floating-point throughput in GFLOP/s
-- measured integer throughput in GIntOps/s
-
-The compute numbers are measured single-thread throughput for this benchmark. They are not the vendor's theoretical peak and should be compared only under similar system conditions.
-
----
-
-## Phase 5 defensive lab
-
-The Phase 5 lab models an end-to-end attack lifecycle without implementing malware behavior:
+Build and test:
 
 ~~~bash
-./latency_analyzer --phase5-lab
-./latency_analyzer --phase5-lab --phase5-runs 5 --spectre-tries 999
+cmake -S MemoryLatencyAnalyzer_linux -B MemoryLatencyAnalyzer_linux/build -DBUILD_TESTING=ON
+cmake --build MemoryLatencyAnalyzer_linux/build --parallel
+ctest --test-dir MemoryLatencyAnalyzer_linux/build --output-on-failure
 ~~~
 
-It combines the local Spectre reliability fixture with simulated local collection, metrics-only export, detector alerts, network egress blocking, and persistence blocking.
+The benchmark is compiled with optimization enabled:
 
-The lab writes `phase5_defensive_report.json` in the current working directory. The recovered test secret is not exported.
+~~~text
+-O2 -march=native
+~~~
 
-Safety boundary:
+and strict warnings:
 
-- no network connections are created
-- no persistence mechanism is installed
-- no process injection is performed
-- no external process or arbitrary memory address is accessed
+~~~text
+-Wall -Wextra -Wpedantic -Wshadow
+-Wconversion -Wsign-conversion -Wformat=2 -Wundef
+~~~
 
-The detector statistics are synthetic lab measurements, not a production EDR or malware detector.
-
----
-
-## Continuous integration
-
-GitHub Actions builds the project on Ubuntu with CMake and runs the unit test suite.
-
-Hardware-specific benchmark numbers are not used as CI assertions because hosted CI runners do not provide a stable microarchitectural environment.
+The code does not depend on global -O0 behavior to remain measurable. Timed sections use explicit data dependencies, compiler barriers, volatile accesses where appropriate, and hardware ordering.
 
 ---
 
@@ -365,33 +342,59 @@ MemoryLatencyAnalyzer/
         ├── evaluation_test.cpp
         ├── operational_lab_test.cpp
         └── statistics_test.cpp
-~~~
 
-## Build
+---
 
-Requirements:
+## What changed in the refactor
 
-- Linux
-- x86/x86-64 CPU
-- CMake 3.15+
-- C++17 compiler
-- pthread support
+The implementation was tightened in the areas that matter most for a microbenchmark:
 
-Build and test:
+- Timer overhead is explicitly calibrated.
+- Dependent pointer chasing is used instead of timing a single tiny load.
+- Forced misses use precomputed random paths so the flush phase does not re-warm the path.
+- Stride tests no longer flush every access.
+- Fractional cycles are preserved.
+- Raw samples across rounds are aggregated correctly.
+- Percentiles are reported.
+- Bandwidth uses wall-clock timing and excludes first-touch page faults.
+- CPU affinity is based on the actual allowed CPU set.
+- Physical-core selection is based on Linux topology information.
+- Shared-memory coordination uses lock-free atomics with explicit memory ordering.
+- CLI parsing rejects malformed numbers and unknown options.
+- The build uses -O2 with strict warnings.
+- CTest coverage was added for statistics.
+- GitHub Actions now builds and tests the project on Ubuntu.
+- The Spectre demo was made self-contained; its timing threshold is calibrated; the bounds check is dynamic; byte extraction reports confidence and retries uncertain observations.
 
-~~~bash
-cmake -S MemoryLatencyAnalyzer_linux -B MemoryLatencyAnalyzer_linux/build -DBUILD_TESTING=ON
-cmake --build MemoryLatencyAnalyzer_linux/build --parallel
-ctest --test-dir MemoryLatencyAnalyzer_linux/build --output-on-failure
-~~~
+---
 
-The benchmark is compiled with optimization enabled:
+## Interpreting results
+
+Think about the outputs this way:
 
 ~~~text
--O2 -march=native
+L1-hot dependent load
+  → approximate hot load latency under this benchmark
+
+Forced miss
+  → cache eviction + demand fetch
+
+Stride
+  → locality + cache + TLB + prefetch behavior
+
+Bandwidth
+  → throughput of the selected access implementation
+
+Shared memory
+  → process synchronization + coherence + round trip
+
+Spectre demo
+  → speculative execution + cache side channel
 ~~~
 
-and strict warnings.
+Do not treat one run as an intrinsic CPU specification.
+
+For meaningful comparisons, keep the environment consistent and record CPU model, topology, memory configuration, NUMA placement, power-management state, kernel, libc/compiler, virtualization, and background load.
 
 ---
 
@@ -410,7 +413,186 @@ Known boundaries include:
 7. Cross-process atomics rely on lock-free x86/Linux behavior for the shared mapping.
 8. Interrupts, scheduler activity, NUMA placement, and power management can affect results.
 9. The implementation is intentionally x86-specific.
-10. The operational labs are synthetic and must not be interpreted as live validation of a security control.
+
+---
+
+## Controlled Spectre reliability lab
+
+The repository also includes a research harness for the built-in Spectre fixture:
+
+~~~bash
+./latency_analyzer --spectre-lab --lab-runs 5 --spectre-tries 999
+~~~
+
+It repeats the same in-process synthetic target and reports:
+
+- exact recovery rate across independent runs
+- aggregate byte accuracy
+- bytes that were correct in every run
+
+This is deliberately restricted to the program's own synthetic secret. It does not accept PIDs, executable paths, arbitrary addresses, or data from other processes.
+
+---
+
+## Evaluation & validation lab
+
+The evaluation layer is a separate local harness for making measurements more repeatable and for documenting the experimental reference boundary. It is the implementation point for alignment, denoising, outlier control, SNR/error metrics, TVLA, recovery checks, platform fingerprints, and synthetic control evaluation.
+
+Run:
+
+~~~bash
+./latency_analyzer --evaluation-lab
+./latency_analyzer --evaluation-lab --evaluation-runs 5 --trace-samples 4096 --trace-average 4
+~~~
+
+The pipeline performs:
+
+1. **Sample alignment** — paired classes are truncated to a common sample count before statistical comparison.
+2. **Block averaging** — adjacent timing observations can be averaged to reduce short-term noise.
+3. **MAD outlier rejection** — median absolute deviation is used instead of a mean/stddev rule so a few large excursions do not dominate the result.
+4. **SNR** — reports the absolute difference between class means relative to pooled timing noise.
+5. **Error rate** — evaluates a simple threshold classifier against the known fixed/random labels.
+6. **TVLA** — runs a single-point Welch two-sample t-test and reports `|t|` against the API's reference threshold of 4.5.
+7. **Repeatability** — computes the coefficient of variation across per-run medians.
+8. **Recovery** — the lab injects one synthetic incomplete-capture fault, exercises the local retry/recovery path, and reports recovery rate.
+9. **Platform fingerprint** — records CPU brand/vendor, core topology, machine architecture, and kernel release so results from other machines can be compared later.
+
+### Default acceptance criteria
+
+The lab records these as engineering defaults, not universal hardware or security standards:
+
+- repeatability CV ≤ 10%
+- classification error ≤ 5%
+- capture recovery rate is reported; the built-in fault should recover to 100%
+- TVLA reference threshold = 4.5
+
+A TVLA threshold crossing is reported separately as `leakage_detected`; it does not automatically mean the measurement pipeline is unstable. The built-in timing fixture is intentionally data-dependent so the TVLA path can be exercised.
+
+### Reference environment and ground truth
+
+The reference boundary is explicit:
+
+- **process boundary:** the lab is self-contained in one process
+- **data boundary:** only synthetic fixed/random inputs are used
+- **observation boundary:** local timing and local filesystem reporting only
+- **ground truth:** the class label for every synthetic trace is known when the trace is collected
+- **interfaces:** the lab exposes a small C++ API plus a JSON report containing metrics, platform metadata, and control contracts
+
+The generated JSON report is suitable as a machine-readable record for later cross-platform comparisons.
+
+### Operational control evaluation
+
+The report contains synthetic scenarios for:
+
+- EDR monitoring of suspicious execution
+- DLP handling of a sensitive-data export
+- microsegmentation blocking an unauthorized egress flow
+- least-privilege denial of protected-resource access
+- network monitoring of a simulated command-channel pattern
+- persistence monitoring
+- defense-evasion/stealth monitoring
+- source-to-sink data-flow monitoring
+
+These scenarios define expected control behavior and produce auditable evidence fields, but they do **not** connect to or claim to validate a real EDR, DLP, firewall, microsegmentation platform, IAM system, or SIEM. Live validation requires replaying equivalent authorized events through the target platform and comparing its telemetry with this ground truth.
+
+### Phase/platform portability
+
+Run the same evaluation command on each target CPU/OS environment and keep the resulting JSON reports. The platform fingerprint plus the measured SNR, TVLA, error rate, and repeatability metrics provide the basis for comparing architecture-dependent behavior. The project does not assume that one CPU's timing numbers transfer unchanged to another.
+
+---
+
+## Operational defensive lab
+
+برای ارزیابی end-to-end، پروژه یک state machine کاملاً مصنوعی دارد:
+
+~~~bash
+./latency_analyzer --operational-lab
+./latency_analyzer --operational-lab --operational-runs 5
+~~~
+
+نسخه فعلی چرخه گسترده‌تری را به‌صورت event شبیه‌سازی می‌کند:
+
+- initial target access
+- system/process discovery
+- credential-access attempt
+- privilege-escalation attempt
+- scheduled/persistent execution
+- process-injection indicator
+- defense-tamper indicator
+- command-and-control pattern
+- lateral-movement attempt
+- sensitive collection
+- archive/collection indicator
+- data staging
+- data transfer / exfiltration
+- cleanup/recovery
+
+هر سناریو در JSON شامل expected control، telemetry source، expected defensive action، detection و recovery است.
+
+این‌ها **emulation** هستند، نه implementation تکنیک تهاجمی واقعی. state machine فقط در حافظه اجرا می‌شود و هیچ socket، C2، privilege change، persistence، process injection، credential access، external-memory access یا real-data transfer انجام نمی‌دهد.
+
+این سناریوها برای ساختن ground truth و ارزیابی قراردادهای کنترلی مناسب‌اند؛ عملکرد یک EDR/DLP/firewall/SIEM واقعی را ادعا نمی‌کنند.
+
+## CPU capability profiler
+
+A separate CPU profiling mode detects the processor identity and measures a short single-thread compute workload.
+
+Run:
+
+~~~bash
+./latency_analyzer --cpu-capability
+./latency_analyzer --cpu-capability --compute-seconds 3
+~~~
+
+It reports:
+
+- CPU vendor and full brand/model string
+- CPUID family, model, and stepping
+- physical cores, logical threads, packages, and SMT state
+- detected SSE/SSE2/SSE4.2/AVX/AVX2/AVX-512F support
+- available maximum-frequency information
+- measured floating-point throughput in GFLOP/s
+- measured integer throughput in GIntOps/s
+
+The compute numbers are measured single-thread throughput for this benchmark. They are not the vendor's theoretical peak and should be compared only under similar system conditions.
+
+---
+
+## Phase 5 defensive lab
+
+The Phase 5 lab models an end-to-end attack lifecycle without implementing malware behavior:
+
+~~~bash
+./latency_analyzer --phase5-lab
+./latency_analyzer --phase5-lab --phase5-runs 5 --spectre-tries 999
+~~~
+
+It combines the local Spectre reliability fixture with simulated:
+
+- local collection
+- local metrics-only export
+- detector alerts and confirmed events
+- network egress blocking
+- persistence blocking
+
+The lab writes `phase5_defensive_report.json` in the current working directory. The report contains only experiment metrics and event dispositions; the recovered test secret is not exported.
+
+Safety boundary:
+
+- no network connections are created
+- no persistence mechanism is installed
+- no process injection is performed
+- no external process or arbitrary memory address is accessed
+
+The detector statistics are synthetic lab measurements, not a production EDR or malware detector.
+
+---
+
+## Continuous integration
+
+GitHub Actions builds the project on Ubuntu with CMake and runs the unit test suite.
+
+Hardware-specific benchmark numbers are not used as CI assertions because hosted CI runners do not provide a stable microarchitectural environment.
 
 ---
 

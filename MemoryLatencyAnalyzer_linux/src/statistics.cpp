@@ -1,28 +1,75 @@
 #include "statistics.hpp"
-#include <numeric>
-#include <cmath>
+
 #include <algorithm>
+#include <cmath>
+#include <numeric>
 
-double Statistics::mean(const std::vector<uint64_t>& data) {
-    if (data.empty()) return 0.0;
-    uint64_t sum = std::accumulate(data.begin(), data.end(), 0ULL);
-    return static_cast<double>(sum) / data.size();
+namespace {
+
+double quantile(const std::vector<double>& sorted, double q) {
+    if (sorted.empty()) return 0.0;
+    if (sorted.size() == 1) return sorted.front();
+
+    const double position = q * static_cast<double>(sorted.size() - 1);
+    const auto lower = static_cast<std::size_t>(std::floor(position));
+    const auto upper = static_cast<std::size_t>(std::ceil(position));
+    if (lower == upper) return sorted[lower];
+
+    const double weight = position - static_cast<double>(lower);
+    return sorted[lower] * (1.0 - weight) + sorted[upper] * weight;
 }
 
-double Statistics::stddev(const std::vector<uint64_t>& data, double mean_value) {
-    if (data.size() < 2) return 0.0;
-    double sum_sq = 0.0;
-    for (auto v : data) {
-        double diff = static_cast<double>(v) - mean_value;
-        sum_sq += diff * diff;
+Statistics::Summary summarize_impl(const std::vector<double>& samples) {
+    Statistics::Summary result;
+    result.count = samples.size();
+    if (samples.empty()) return result;
+
+    std::vector<double> sorted(samples);
+    std::sort(sorted.begin(), sorted.end());
+
+    const long double sum =
+        std::accumulate(samples.begin(), samples.end(), 0.0L);
+
+    result.mean =
+        static_cast<double>(sum / static_cast<long double>(samples.size()));
+    result.median = quantile(sorted, 0.50);
+    result.p95 = quantile(sorted, 0.95);
+    result.p99 = quantile(sorted, 0.99);
+    result.min = sorted.front();
+    result.max = sorted.back();
+
+    if (samples.size() >= 2) {
+        long double squared = 0.0L;
+        for (const double value : samples) {
+            const long double diff =
+                static_cast<long double>(value) - result.mean;
+            squared += diff * diff;
+        }
+
+        result.stddev = std::sqrt(static_cast<double>(
+            squared / static_cast<long double>(samples.size() - 1)));
     }
-    return std::sqrt(sum_sq / (data.size() - 1));
+
+    return result;
 }
 
-uint64_t Statistics::min_value(const std::vector<uint64_t>& data) {
-    return data.empty() ? 0 : *std::min_element(data.begin(), data.end());
+} // namespace
+
+namespace Statistics {
+
+Summary summarize(const std::vector<double>& samples) {
+    return summarize_impl(samples);
 }
 
-uint64_t Statistics::max_value(const std::vector<uint64_t>& data) {
-    return data.empty() ? 0 : *std::max_element(data.begin(), data.end());
+Summary summarize(const std::vector<std::uint64_t>& samples) {
+    std::vector<double> converted;
+    converted.reserve(samples.size());
+
+    for (const std::uint64_t value : samples) {
+        converted.push_back(static_cast<double>(value));
+    }
+
+    return summarize_impl(converted);
 }
+
+} // namespace Statistics

@@ -44,6 +44,7 @@ void print_help() {
         << "  --spectre-lab          Repeat the self-contained Spectre demo for reliability analysis\n"
         << "  --lab-runs N           Independent Spectre lab runs (default 5)\n"
         << "  --phase5-lab           Run the Phase 5 defensive lab and exit\n"
+        << "  --phase5-runs N        Independent Phase 5 lab runs (default 5)\n"
         << "  --help                 Show this help\n";
 }
 
@@ -171,6 +172,11 @@ int main(int argc, char* argv[]) {
             }
         } else if (arg == "--phase5-lab") {
             run_phase5_lab = true;
+        } else if (arg == "--phase5-runs") {
+            if (!consume_int(argc, argv, i, phase5_runs) || phase5_runs <= 0) {
+                std::cerr << "Invalid --phase5-runs value\n";
+                return 2;
+            }
         } else if (arg == "--spectre-tries") {
             if (!consume_int(argc, argv, i, spectre_tries) || spectre_tries <= 0) {
                 std::cerr << "Invalid --spectre-tries value\n";
@@ -206,27 +212,27 @@ int main(int argc, char* argv[]) {
                 spectre_tries);
 
         std::cout
-            << "Phase 5 Defensive Lab\\n"
+            << "Phase 5 Defensive Lab\n"
             << "Runs: " << lab.runs
-            << " | tries/byte: " << lab.tries_per_byte << '\\n'
+            << " | tries/byte: " << lab.tries_per_byte << '\n'
             << "Byte accuracy: "
-            << lab.byte_accuracy_percent << "%\\n"
+            << lab.byte_accuracy_percent << "%\n"
             << "Exact recovery: "
-            << lab.exact_recovery_rate_percent << "%\\n"
+            << lab.exact_recovery_rate_percent << "%\n"
             << "Simulated alerts: "
-            << lab.simulated_alerts << '\\n'
+            << lab.simulated_alerts << '\n'
             << "Confirmed alerts: "
-            << lab.simulated_confirmed_alerts << '\\n'
+            << lab.simulated_confirmed_alerts << '\n'
             << "False positives: "
-            << lab.simulated_false_positives << '\\n'
-            << "Network access: NOT PERFORMED\\n"
-            << "Persistence: NOT PERFORMED\\n'
-            << "External process access: NOT PERFORMED\\n'
+            << lab.simulated_false_positives << '\n'
+            << "Network access: NOT PERFORMED\n"
+            << "Persistence: NOT PERFORMED\n"
+            << "External process access: NOT PERFORMED\n"
             << "Report: "
             << (lab.report_written
                     ? lab.report_path
                     : "FAILED")
-            << '\\n';
+            << '\n';
 
         return lab.report_written ? 0 : 1;
     }

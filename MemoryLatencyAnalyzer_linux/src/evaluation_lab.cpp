@@ -872,14 +872,18 @@ double snr_linear(
     const std::vector<double>& first,
     const std::vector<double>& second,
     OutlierMethod method) {
-    const auto a = robust_metrics(
+    const auto a = robust_metrics_internal(
         first,
         method,
-        3.5);
-    const auto b = robust_metrics(
+        3.5,
+        0U,
+        0U);
+    const auto b = robust_metrics_internal(
         second,
         method,
-        3.5);
+        3.5,
+        0U,
+        0U);
 
     if (a.kept_count < 2U || b.kept_count < 2U) {
         return 0.0;
@@ -900,14 +904,18 @@ double snr_linear(
 double classification_error_rate(
     const std::vector<double>& fixed_samples,
     const std::vector<double>& random_samples) {
-    const auto fixed = robust_metrics(
+    const auto fixed = robust_metrics_internal(
         fixed_samples,
         OutlierMethod::MAD,
-        3.5);
-    const auto random = robust_metrics(
+        3.5,
+        0U,
+        0U);
+    const auto random = robust_metrics_internal(
         random_samples,
         OutlierMethod::MAD,
-        3.5);
+        3.5,
+        0U,
+        0U);
 
     if (fixed.kept_count == 0U ||
         random.kept_count == 0U) {
@@ -1389,7 +1397,7 @@ EvaluationLabResult EvaluationLab::run(
         repeated_fixed_runs.push_back(
             std::move(aligned_fixed));
 
-        result.round_tvla.push_back(
+            result.round_tvla.push_back(
             Evaluation::welch_tvla(
                 fixed_averaged,
                 random_averaged));
@@ -1542,6 +1550,7 @@ EvaluationLabResult EvaluationLab::run(
             adjusted_p_values[i] < kAlpha;
     }
 
+    result.run_medians = run_medians;
     result.repeatability_cv_percent =
         repeatability_cv(run_medians);
     result.repeatability_icc =

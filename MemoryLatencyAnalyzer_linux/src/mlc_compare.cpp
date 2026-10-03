@@ -261,8 +261,7 @@ double measure_ring_latency(
 void load_worker(
     std::size_t bytes,
     int cpu,
-    std::atomic<bool>& stop,
-    volatile std::uint64_t& sink) {
+    std::atomic<bool>& stop) {
     bytes = std::max(bytes, kMiB);
     bytes = (bytes / sizeof(std::uint64_t)) *
             sizeof(std::uint64_t);
@@ -276,9 +275,7 @@ void load_worker(
         0);
     if (memory == MAP_FAILED) return;
 
-    if (!PlatformUtils::pin_current_thread(cpu)) {
-        // Continue without pinning rather than changing benchmark semantics.
-    }
+    (void)PlatformUtils::pin_current_thread(cpu);
 
     auto* data =
         static_cast<volatile std::uint64_t*>(memory);
@@ -290,13 +287,13 @@ void load_worker(
     }
 
     while (!stop.load(std::memory_order_relaxed)) {
-        std::uint64_t local = 0;
+        std::uint64_t local = 0U;
         for (std::size_t i = 0;
              i < bytes / sizeof(std::uint64_t);
              i += 8U) {
             local ^= data[i];
         }
-        sink ^= local;
+        (void)local;
     }
 
     munmap(memory, bytes);
@@ -623,12 +620,6 @@ MlcComparisonReport MlcComparison::run(
             report.load_worker_count = cpus.size();
 
             RingBuffer loaded_ring(buffer_bytes);
-            const std::size_t samples =
-                static_cast<std::size_t>(
-                    std::max(1, iterations)) *
-                static_cast<std::size_t>(
-                    std::max(1, rounds));
-
             for (const auto delay : delays_cycles) {
                 std::optional<double> mlc_latency =
                     std::nullopt;
@@ -662,8 +653,7 @@ MlcComparisonReport MlcComparison::run(
                             load_worker,
                             per_worker,
                             cpu,
-                            std::ref(stop),
-                            std::ref(sink));
+                            std::ref(stop));
                         workers.push_back(std::move(worker));
                     }
                 }

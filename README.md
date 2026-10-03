@@ -1,362 +1,303 @@
 # Memory Microarchitecture & Performance Analyzer
 
-**MemoryLatencyAnalyzer** is a Linux/x86 microbenchmark and systems-performance analysis tool written in C++17. It measures several aspects of the CPU memory subsystem rather than memory latency alone:
+MemoryLatencyAnalyzer is a Linux/x86-64 microbenchmark for studying the CPU memory subsystem and related microarchitectural effects.
 
-- CPU cache hierarchy discovery (L1/L2/L3)
-- Cache-hit and forced cache-miss load latency
-- Load/store microbenchmarks
-- Memory access behavior under different strides
-- Read, write, and copy throughput
-- Throughput comparison across `mmap`, `malloc`, and 2 MiB Huge Pages
-- Cross-process shared-memory round-trip latency and cache-coherence traffic
-- Statistical summaries and CSV/history output
-- A self-contained educational Spectre Variant 1 side-channel demonstration
+It works close to the hardware with RDTSCP, LFENCE, CLFLUSH, CPUID, Linux CPU affinity, mmap, POSIX shared memory, lock-free atomics, and optional Huge Pages.
 
-The implementation is intentionally close to the hardware: it uses x86 `RDTSC`, `LFENCE`, `CLFLUSH`, `CPUID`, CPU affinity, POSIX shared memory, `mmap`, and Huge Pages.
-
-> **Scope:** this project is a low-level learning and experimentation tool. Its results are workload- and platform-dependent and should not be interpreted as universal specifications for a CPU or DRAM subsystem.
+> Scope: this is an educational and experimental microbenchmark. Results depend on the machine and environment and should primarily be used for controlled comparisons.
 
 ---
 
-## What this project actually measures
+## What it measures
 
-The name "MemoryLatencyAnalyzer" is slightly narrower than the implementation. The executable is better thought of as a **CPU/memory microarchitecture laboratory**.
+- L1-hot dependent load latency
+- Controlled cache-miss latency using randomized pointer chasing and CLFLUSH
+- Hot-store issue throughput
+- Dependent pointer-chase behavior at several memory strides
+- Read, write, and copy throughput
+- Allocator comparison: mmap, malloc, optional 2 MiB Huge Pages
+- Cross-process shared-memory round-trip latency
+- Cache-coherence and synchronization effects
+- Mean, median, p95, p99, standard deviation, minimum, maximum
+- CSV export and historical logging
+- A self-contained educational Spectre Variant 1 demonstration
 
-### 1. CPU and cache discovery
-
-The program queries x86 `CPUID leaf 4` to discover cache properties such as:
-
-- cache level
-- cache type (data or unified)
-- cache line size
-- associativity (ways)
-- set count
-- calculated capacity
-
-If the standard cache enumeration is unavailable, the code has a fallback L3-size query.
-
-It also:
-
-- estimates the TSC rate against wall-clock time
-- checks the CPUID Hyper-Threading capability bit
-- reports the online logical CPU count
-
-The current implementation treats `logical_cores / 2` as the physical-core count when Hyper-Threading is reported, so that value should be considered an approximation rather than a complete CPU-topology discovery mechanism.
-
-### 2. Cache-hit latency
-
-A buffer is allocated with `mmap`. Its default size is approximately:
-
-`max(32 MiB, 2.5 × detected L3 capacity)`
-
-A location is warmed up by repeatedly reading it, then each measurement performs a serialized timestamped load.
-
-Conceptually:
-
-```text
-warm cache line
-      │
-      ▼
- RDTSC / load / RDTSC
-      │
-      ▼
- measured cycles
-```
-
-The implementation records the mean, sample standard deviation, minimum, and maximum.
-
-### 3. Forced cache-miss latency
-
-For the miss test, cache lines are explicitly evicted with x86 `CLFLUSH` before the timed load.
-
-The simplified sequence is:
-
-```text
-memory address
-     │
-     ├── CLFLUSH
-     ▼
-cache line evicted
-     │
-     ├── serialized RDTSC
-     ▼
-     load
-     │
-     ├── serialized RDTSC
-     ▼
-miss latency in TSC cycles
-```
-
-This is a **controlled flush-induced miss experiment**. It should not be interpreted as a direct measurement of "DRAM latency" in every possible workload, because real applications may be affected by cache state, hardware prefetching, TLB state, memory-level parallelism, and other microarchitectural effects.
-
-### 4. Load vs. store
-
-The load benchmark currently reuses the cache-hit measurement path.
-
-The store benchmark times:
-
-```cpp
-buffer_[0] = value;
-```
-
-on a cache-resident location.
-
-Therefore, the reported store number is best interpreted as the observed cost of a small CPU store under this setup, not the time required for the modified data to reach DRAM. Store buffers, write-back behavior, and cache coherence all separate those concepts.
-
-### 5. Stride experiments
-
-The executable tests several strides:
-
-```text
-64 B
-256 B
-1 KiB
-4 KiB
-16 KiB
-```
-
-The goal is to expose how access distance changes the observed behavior of the memory hierarchy.
-
-An important implementation detail is that the miss benchmark still uses `CLFLUSH` before individual measurements. Consequently, these results are not a pure "natural cache miss-rate vs. stride" experiment; they are a controlled access-latency experiment in which stride can interact with cache lines, pages, TLB behavior, and hardware prefetching.
-
-### 6. Memory bandwidth / throughput
-
-The bandwidth module allocates two large buffers and measures:
-
-- sequential reads
-- writes using `memset`
-- copies using `memcpy`
-
-The default benchmark size from `main.cpp` is 64 MiB.
-
-Three allocation modes are attempted:
-
-1. **`mmap`** — anonymous private virtual memory
-2. **`malloc`** — heap allocation
-3. **`LargePage`** — Linux `MAP_HUGETLB`, using 2 MiB Huge Pages
-
-The measured cycles are converted to a throughput estimate in GB/s using the measured TSC rate.
-
-The Huge Page path requires pre-reserved Huge Pages on the host. When allocation fails, that mode is skipped.
-
-### 7. Cross-process shared memory
-
-The project also contains a separate experiment for inter-process communication.
-
-The parent process creates a POSIX shared-memory object with:
-
-```text
-shm_open + ftruncate + mmap
-```
-
-It then uses `fork()` to create a consumer process.
-
-The two processes perform a ping-pong protocol:
-
-```text
-Producer                              Consumer
-   │                                     │
-   │ request.ready = 1                   │
-   ├────────────────────────────────────>│
-   │                                     │
-   │                         response=1   │
-   │<────────────────────────────────────┤
-   │                                     │
-   └────── measure the round trip ───────┘
-```
-
-The synchronization slots are aligned to 64-byte boundaries to reduce false sharing between control variables.
-
-The parent is pinned to logical CPU 0 and the consumer attempts to use logical CPU 1. This makes the experiment useful for observing cross-core cache-coherence and synchronization effects in addition to the cost of the shared-memory protocol itself.
-
-This measurement is therefore a **shared-memory round-trip latency**, not a pure DRAM latency measurement.
-
-### 8. Spectre Variant 1 demonstration
-
-The project contains an educational Spectre Variant 1 demonstration that follows the classic bounds-check bypass + cache side-channel pattern.
-
-The victim function conceptually does:
-
-```text
-if (x < array1_size)
-    array2[array1[x] * 4096]
-```
-
-The attack code:
-
-1. flushes the probe array from cache
-2. repeatedly trains the branch predictor with an in-bounds index
-3. supplies an out-of-bounds malicious index
-4. relies on speculative execution
-5. reloads the 256 probe locations
-6. counts cache hits
-7. selects the byte value with the strongest score
-
-Run it explicitly with:
-
-```bash
-./latency_analyzer --spectre
-```
-
-The demo uses an in-process hard-coded string:
-
-```text
-The Magic Words are Squeamish Ossifrage.
-```
-
-It is intended as a **local educational demonstration of a microarchitectural side channel**, not as a general-purpose Spectre exploit against arbitrary processes.
+The repository is therefore better described as a CPU/memory microarchitecture laboratory than as a simple memory-latency calculator.
 
 ---
 
 ## Measurement methodology
 
-### Cycle timing
+### CPU and cache discovery
 
-The project uses the x86 Time Stamp Counter through `__rdtsc()`.
+The analyzer queries x86 CPUID leaf 4 and reports cache level, data/unified type, cache-line size, associativity, set count, and calculated capacity.
 
-Timing is surrounded by `LFENCE`-based serialization:
+Linux CPU topology is read from the system CPU topology files when available. Physical cores are therefore not inferred with the simplistic "logical CPUs divided by two" rule.
 
-```text
-LFENCE
-RDTSC
-operation
-LFENCE
-RDTSC
-```
+The program also reports CPU model, logical CPUs visible to the process, physical cores, package count, and whether SMT is active.
 
-This reduces instruction reordering around the timed region, but the timing sequence itself has non-zero overhead. For very small operations, that overhead can be a significant fraction of the observed value.
+### TSC timing
 
-### CPU affinity
+Latency uses ordered RDTSCP reads together with LFENCE and compiler barriers.
 
-The main process attempts to pin its current thread to logical CPU 0 with:
+For very small operations, the timestamping sequence itself is significant. The benchmark therefore:
 
-```cpp
-pthread_setaffinity_np(...)
-```
+1. Measures the timing primitive's own median overhead.
+2. Times a batch of dependent operations.
+3. Subtracts the calibrated overhead once per batch.
+4. Divides by the number of operations.
+5. Keeps fractional cycles instead of truncating integer division.
 
-It also attempts to increase the process priority with `setpriority(..., -10)`. Higher priority may require additional privileges; failure is intentionally treated as best-effort.
+The TSC rate is calibrated against CLOCK_MONOTONIC_RAW.
 
-The shared-memory consumer attempts to run on logical CPU 1.
+Important: the reported GHz value is the TSC rate, not the instantaneous CPU core or turbo frequency.
 
-### Warm-up
+### Cache-hit latency
 
-Most latency measurements perform warm-up iterations before collecting samples. This reduces some first-touch and cold-start effects, but it does not eliminate all OS and hardware variability.
+The hit benchmark uses a dependent pointer chain whose node points back to itself.
 
-### Statistics
+~~~text
+load address A
+    ↓
+load address A
+    ↓
+load address A
+    ↓
+...
+~~~
 
-For each measurement series the code reports:
+Because each load depends on the previous load's result, the CPU cannot simply overlap many independent requests.
 
-- arithmetic mean
-- sample standard deviation
-- minimum
-- maximum
+The target is warmed before measurement, so this approximates the latency of a hot, dependent load.
 
-The current program then averages the per-round statistics for some results. In particular, averaging standard deviations, minima, and maxima across independent rounds is not equivalent to recomputing those statistics from all raw samples. For rigorous benchmarking, raw samples should be retained and aggregated centrally.
+### Forced cache-miss latency
+
+A deterministic pseudo-random ring is built across cache-line-aligned nodes.
+
+Before a timed batch, the exact nodes required by that batch are flushed. The flush list is taken from a precomputed index order, so preparing the experiment does not accidentally read and re-warm the lines being flushed.
+
+~~~text
+CLFLUSH required nodes
+        ↓
+MFENCE
+        ↓
+dependent load → dependent load → ...
+        ↓
+average cycles per load
+~~~
+
+This is a controlled flush-induced demand-load experiment. It is not a universal DRAM-latency constant.
+
+### Store benchmark
+
+The store test performs a batch of stores to a small set of hot cache lines and reports cycles per store.
+
+This is intentionally called store issue throughput. A CPU store can be accepted into the store machinery while the modified line remains in the cache hierarchy; this is not the same thing as "time until RAM has received the data."
+
+### Stride experiments
+
+Dependent pointer chains are built with these strides:
+
+~~~text
+64 B
+256 B
+1 KiB
+4 KiB
+16 KiB
+~~~
+
+Stride tests do not flush every access. They show how access distance interacts with cache locality, cache capacity, TLB behavior, page boundaries, prefetching, and dependent-load latency.
 
 ---
 
-## Command-line interface
+## Bandwidth
 
-```text
+The bandwidth module measures:
+
+- Read: one byte sampled per 64-byte cache line
+- Write: memset
+- Copy: memcpy
+
+The source and destination buffers are touched before timing so first-touch page faults are not mixed into the timed region.
+
+Allocation modes are:
+
+- mmap
+- malloc
+- LargePage using Linux MAP_HUGETLB
+
+LargePage uses 2 MiB Huge Pages and is skipped when the host has no suitable reserved Huge Pages.
+
+Bandwidth uses CLOCK_MONOTONIC_RAW and is reported in GiB/s, so the calculation does not depend on an assumed CPU core frequency.
+
+These numbers are benchmark-specific throughput measurements. libc implementations, cache state, memory placement, and the underlying CPU all affect them.
+
+---
+
+## Cross-process shared memory
+
+The shared-memory test creates a POSIX shared-memory region and maps it into a parent and child process created with fork.
+
+The processes perform a ping-pong:
+
+~~~text
+Producer                         Consumer
+
+request = 1  ─────────────────►
+                               response = 1
+              ◄────────────────
+~~~
+
+Each synchronization flag is isolated on its own 64-byte cache line to reduce false sharing.
+
+The test uses lock-free uint32 atomics with acquire/release ordering. The consumer is placed on a different physical core when the process's allowed CPUs and Linux topology make that possible.
+
+The measured quantity is a cross-process round trip. It therefore includes synchronization, scheduling, cache-coherence, and inter-process communication effects. It is not direct DRAM latency.
+
+---
+
+## Spectre Variant 1 demonstration
+
+The optional Spectre mode is a local, self-contained educational demonstration.
+
+It contains:
+
+1. A bounds-checked victim function
+2. Branch-predictor training
+3. A logically out-of-bounds index
+4. A cache-based probe array
+5. Timed reloads of 256 possible byte values
+
+The secret is placed inside the demonstration's own data array, so the example does not attack another process.
+
+Run it with:
+
+~~~bash
+./latency_analyzer --spectre
+~~~
+
+A successful leak is not guaranteed. CPU design, operating-system mitigations, virtualization, compiler behavior, and other environmental factors can prevent the side channel from being observable.
+
+---
+
+## Statistics
+
+Each measurement keeps raw samples from all requested rounds and computes:
+
+- Count
+- Mean
+- Median
+- P95
+- P99
+- Sample standard deviation
+- Minimum
+- Maximum
+
+This replaces the previous practice of averaging per-round minimums, maximums, and standard deviations. Those quantities are not correctly reconstructed by simply averaging the round summaries.
+
+---
+
+## CPU affinity and scheduling
+
+The analyzer discovers the CPUs actually allowed to the process with sched_getaffinity.
+
+It then attempts to:
+
+- Pin the benchmark thread to one allowed CPU
+- Increase scheduling priority as a best-effort optimization
+- Select a different physical core for the shared-memory consumer when possible
+
+Restricted containers or hosted environments may reject affinity or priority changes. The benchmark continues and reports that limitation instead of assuming CPU 0 or CPU 1 always exists.
+
+---
+
+## Command line
+
+~~~text
 Usage: latency_analyzer [options]
 
-  --rounds N
-      Number of full latency rounds (default: 5)
+Latency:
+  --rounds N             Independent measurement rounds (default 5)
+  --iterations N         Samples per round (default 1000)
+  --warmup N             Warmup samples (default 150)
+  --buffer-mib N         Latency buffer size in MiB (default 32)
 
-  --iterations N
-      Iterations per measurement (default: 1000)
+Bandwidth:
+  --bandwidth-mib N      Bandwidth buffer size in MiB (default 64)
+  --no-bandwidth         Skip bandwidth measurements
 
-  --warmup N
-      Warmup iterations (default: 150)
+Shared memory:
+  --shm-iterations N     Cross-process round trips (default 2000)
+  --no-shared-memory     Skip the shared-memory test
 
-  --shm-iterations N
-      Shared-memory ping-pong iterations (default: 2000)
+Output:
+  --csv FILE             Write latency, bandwidth, and shared-memory results
+  --quiet                Minimal output
+  --verbose              Include p95/p99/stddev/min/max
 
-  --no-shared-memory
-      Skip the cross-process shared-memory test
-
-  --csv FILE
-      Write latency results to a CSV file
-
-  --quiet
-      Reduce console output
-
-  --verbose
-      Print standard deviation, minimum, and maximum
-
-  --spectre
-      Run the Spectre Variant 1 demonstration and exit
-
-  --help
-      Show command-line help
-```
+Other:
+  --spectre              Run the self-contained Spectre V1 demo and exit
+  --help                 Show this help
+~~~
 
 Examples:
 
-```bash
-# Default benchmark
+~~~bash
 ./latency_analyzer
-
-# More repetitions, no shared-memory test
-./latency_analyzer --rounds 10 --iterations 5000 --no-shared-memory
-
-# Detailed statistics
-./latency_analyzer --verbose
-
-# Save latency measurements
+./latency_analyzer --rounds 10 --iterations 5000 --verbose
+./latency_analyzer --buffer-mib 128 --bandwidth-mib 256
+./latency_analyzer --no-bandwidth --no-shared-memory
 ./latency_analyzer --csv results.csv
-
-# Run only the educational Spectre demo
 ./latency_analyzer --spectre
-```
+~~~
 
 ---
 
 ## Build
 
-The implementation currently targets Linux and C++17.
-
-### Requirements
+Requirements:
 
 - Linux
-- x86/x86-64 CPU with the required timing/cache instructions
+- x86/x86-64 CPU
 - CMake 3.15+
-- C++17-compatible compiler
+- C++17 compiler
 - pthread support
 
-Build:
+Build and test:
 
-```bash
-cd MemoryLatencyAnalyzer_linux
-cmake -S . -B build
-cmake --build build
-```
+~~~bash
+cmake -S MemoryLatencyAnalyzer_linux -B MemoryLatencyAnalyzer_linux/build -DBUILD_TESTING=ON
+cmake --build MemoryLatencyAnalyzer_linux/build --parallel
+ctest --test-dir MemoryLatencyAnalyzer_linux/build --output-on-failure
+~~~
 
-The resulting executable is:
+The benchmark is compiled with optimization enabled:
 
-```text
-build/latency_analyzer
-```
+~~~text
+-O2 -march=native
+~~~
 
-The project is compiled with:
+and strict warnings:
 
-```text
--O0 -march=native
-```
+~~~text
+-Wall -Wextra -Wpedantic -Wshadow
+-Wconversion -Wsign-conversion -Wformat=2 -Wundef
+~~~
 
-The disabled compiler optimization is deliberate for a low-level experiment, although it also means this is not equivalent to measuring a normally optimized application workload.
+The code does not depend on global -O0 behavior to remain measurable. Timed sections use explicit data dependencies, compiler barriers, volatile accesses where appropriate, and hardware ordering.
 
 ---
 
 ## Project structure
 
-```text
+~~~text
 MemoryLatencyAnalyzer/
+├── .github/workflows/build.yml
+├── .gitignore
 ├── README.md
 └── MemoryLatencyAnalyzer_linux/
     ├── CMakeLists.txt
-    ├── config/
-    │   └── settings.hpp
+    ├── config/settings.hpp
     ├── include/
     │   ├── bandwidth_measurer.hpp
     │   ├── cpu_info.hpp
@@ -367,126 +308,104 @@ MemoryLatencyAnalyzer/
     │   ├── spectre_v1.hpp
     │   ├── statistics.hpp
     │   └── timer.hpp
-    └── src/
-        ├── bandwidth_measurer.cpp
-        ├── cpu_info.cpp
-        ├── latency_measurer.cpp
-        ├── main.cpp
-        ├── platform_utils.cpp
-        ├── reporter.cpp
-        ├── shared_memory_measurer.cpp
-        ├── spectre_v1.cpp
-        └── statistics.cpp
-```
-
-### Component responsibilities
-
-| Component | Responsibility |
-|---|---|
-| `main.cpp` | CLI parsing and benchmark orchestration |
-| `latency_measurer.cpp` | Hit/miss/load/store/stride latency measurements |
-| `bandwidth_measurer.cpp` | Read/write/copy throughput |
-| `shared_memory_measurer.cpp` | POSIX shared-memory cross-process ping-pong |
-| `spectre_v1.cpp` | Spectre Variant 1 educational demo |
-| `cpu_info.cpp` | Cache and CPU information via CPUID/TSC |
-| `statistics.cpp` | Mean/stddev/min/max |
-| `reporter.cpp` | Console, CSV, and history output |
-| `platform_utils.cpp` | CPU affinity and best-effort priority adjustment |
-| `timer.hpp` | `RDTSC`, `LFENCE`, and `CLFLUSH` primitives |
+    ├── src/
+    │   ├── bandwidth_measurer.cpp
+    │   ├── cpu_info.cpp
+    │   ├── latency_measurer.cpp
+    │   ├── main.cpp
+    │   ├── platform_utils.cpp
+    │   ├── reporter.cpp
+    │   ├── shared_memory_measurer.cpp
+    │   ├── spectre_v1.cpp
+    │   ├── statistics.cpp
+    │   └── timer.cpp
+    └── tests/statistics_test.cpp
+~~~
 
 ---
 
-## Interpreting the results
+## What changed in the refactor
 
-A useful mental model is:
+The implementation was tightened in the areas that matter most for a microbenchmark:
 
-```text
-Cache hit
-  └── very close to the core/cache hierarchy
+- Timer overhead is explicitly calibrated.
+- Dependent pointer chasing is used instead of timing a single tiny load.
+- Forced misses use precomputed random paths so the flush phase does not re-warm the path.
+- Stride tests no longer flush every access.
+- Fractional cycles are preserved.
+- Raw samples across rounds are aggregated correctly.
+- Percentiles are reported.
+- Bandwidth uses wall-clock timing and excludes first-touch page faults.
+- CPU affinity is based on the actual allowed CPU set.
+- Physical-core selection is based on Linux topology information.
+- Shared-memory coordination uses lock-free atomics with explicit memory ordering.
+- CLI parsing rejects malformed numbers and unknown options.
+- The build uses -O2 with strict warnings.
+- CTest coverage was added for statistics.
+- GitHub Actions now builds and tests the project on Ubuntu.
+- The Spectre demo was made self-contained and its timing threshold is calibrated instead of hard-coded.
 
-Forced cache miss
-  └── cache eviction + demand load
-      └── may involve lower cache levels and/or DRAM
+---
 
-Stride experiments
-  └── access pattern + cache/TLB/prefetch interactions
+## Interpreting results
+
+Think about the outputs this way:
+
+~~~text
+L1-hot dependent load
+  → approximate hot load latency under this benchmark
+
+Forced miss
+  → cache eviction + demand fetch
+
+Stride
+  → locality + cache + TLB + prefetch behavior
 
 Bandwidth
-  └── sustained throughput of the benchmarked access pattern
+  → throughput of the selected access implementation
 
-Shared-memory round trip
-  └── process communication + synchronization + cache coherence
+Shared memory
+  → process synchronization + coherence + round trip
 
 Spectre demo
-  └── speculative execution + cache side channel
-```
+  → speculative execution + cache side channel
+~~~
 
-Do not compare results across machines without controlling, or at least recording, factors such as:
+Do not treat one run as an intrinsic CPU specification.
 
-- CPU microarchitecture
-- core and thread topology
-- CPU frequency / turbo behavior
-- power-management state
-- memory configuration and channels
-- NUMA placement
-- background system load
-- kernel and scheduler behavior
-- compiler and libc implementation
-- virtualization / cloud environment
-
-For reproducible studies, run multiple independent trials, retain raw samples, record the complete machine configuration, and avoid drawing conclusions from a single aggregate number.
+For meaningful comparisons, keep the environment consistent and record CPU model, topology, memory configuration, NUMA placement, power-management state, kernel, libc/compiler, virtualization, and background load.
 
 ---
 
-## Known limitations and engineering notes
+## Limitations
 
-This repository is intentionally lightweight, so the current implementation has several limitations worth knowing before using it as a scientific benchmark:
+This is a serious low-level microbenchmark, but it is not a replacement for a complete benchmark suite.
 
-1. **TSC frequency is used as the GHz conversion factor.** The code estimates the TSC rate over wall-clock time; this is not necessarily the instantaneous core frequency reported by the CPU.
+Known boundaries include:
 
-2. **Timer overhead is not explicitly calibrated.** The measured region includes the cost of the timestamping/serialization sequence.
-
-3. **Round statistics are aggregated approximately.** Per-round minima/maxima/stddev values are averaged instead of recomputed from all raw observations.
-
-4. **Load/store tests are microbenchmarks, not end-to-end memory-access latencies.** In particular, the store test does not measure write-back completion to DRAM.
-
-5. **Bandwidth numbers are implementation-specific throughput estimates.** `memset` and `memcpy` depend on compiler/libc and CPU-specific implementations.
-
-6. **CPU topology detection is simplified.** Hyper-Threading detection and physical-core estimation are not a substitute for full topology parsing.
-
-7. **Cross-process synchronization uses volatile shared flags.** This is intentionally simple, but a more rigorous implementation would use explicit atomic/inter-process synchronization semantics and document the memory-ordering assumptions.
-
-8. **The benchmark is x86-specific.** It uses `RDTSC`, `LFENCE`, `CLFLUSH`, and x86 CPUID facilities.
-
-These limitations do not make the project useless; they define it correctly as a **hardware-oriented educational and exploratory microbenchmark** rather than a standards-grade benchmark suite.
+1. TSC calibration measures TSC rate, not instantaneous core frequency.
+2. Residual timer and fence effects remain even after overhead calibration.
+3. Forced misses are intentionally synthetic and use CLFLUSH.
+4. Store results describe store issue throughput, not DRAM write-back completion.
+5. Bandwidth results depend on libc and the selected access implementation.
+6. Linux topology information can be incomplete in containers or unusual environments.
+7. Cross-process atomics rely on lock-free x86/Linux behavior for the shared mapping.
+8. Interrupts, scheduler activity, NUMA placement, and power management can affect results.
+9. The implementation is intentionally x86-specific.
 
 ---
 
-## Why this project is useful
+## Continuous integration
 
-The value of this project is not a single "memory latency" number. It provides a compact way to experiment with relationships between:
+GitHub Actions builds the project on Ubuntu with CMake and runs the unit test suite.
 
-- cache hierarchy
-- locality and stride
-- cache eviction
-- timing primitives
-- CPU affinity
-- memory allocation mechanisms
-- Huge Pages
-- cache coherence
-- process synchronization
-- speculative execution
-- cache-based side channels
-
-In other words, it connects high-level performance behavior to mechanisms that are normally hidden below application code.
+Hardware-specific benchmark numbers are not used as CI assertions because hosted CI runners do not provide a stable microarchitectural environment.
 
 ---
 
 ## License
 
-No project license has been selected yet. Until a license is added to the repository, reuse and redistribution should not be assumed to be permitted beyond the rights granted by applicable law.
-
----
+No project license has been selected yet. Until a license is added, reuse and redistribution should not be assumed to be permitted beyond the rights granted by applicable law.
 
 ## Author
 

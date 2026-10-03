@@ -48,7 +48,12 @@ void print_help() {
         << "  --phase5-lab           Run the Phase 5 defensive lab and exit\n"
         << "  --phase5-runs N        Independent Phase 5 lab runs (default 5)\n"
         << "  --cpu-capability       Detect CPU and run compute-capacity benchmark\n"
-        << "  --compute-seconds N    CPU benchmark duration in seconds (default 1)\n        << "  --evaluation-lab       Run stability, SNR, TVLA and control validation lab\n"        << "  --evaluation-runs N    Evaluation runs (default 3)\n"        << "  --trace-samples N      Timing samples per class (default 2048)\n"        << "  --trace-average N      Samples averaged per block (default 4)\n"        << "  --evaluation-report F  Write evaluation JSON report (default evaluation_lab_report.json)\n"
+        << "  --compute-seconds N    CPU benchmark duration in seconds (default 1)\n"
+        << "  --evaluation-lab       Run stability, SNR, TVLA and control validation lab\n"
+        << "  --evaluation-runs N    Evaluation runs (default 3)\n"
+        << "  --trace-samples N      Timing samples per class (default 2048)\n"
+        << "  --trace-average N      Samples averaged per block (default 4)\n"
+        << "  --evaluation-report F  Write evaluation JSON report (default evaluation_lab_report.json)\n"
         << "  --help                 Show this help\n";
 }
 

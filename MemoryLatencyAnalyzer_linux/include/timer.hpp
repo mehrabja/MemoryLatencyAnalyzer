@@ -1,19 +1,21 @@
 #pragma once
+
 #include <cstdint>
-#include <x86intrin.h>
 
-class Timer {
-public:
-    static inline uint64_t rdtsc() {
-        return __rdtsc();
-    }
+namespace Timer {
 
-    static inline void serialize() {
-        _mm_lfence();
-    }
+void compiler_barrier();
 
-    static inline void clflush(const volatile void* addr) {
-        _mm_clflush(const_cast<const void*>(addr));
-        _mm_mfence();
-    }
-};
+std::uint64_t read_tsc_start(unsigned* aux = nullptr);
+std::uint64_t read_tsc_end(unsigned* aux = nullptr);
+
+std::uint64_t monotonic_raw_ns();
+
+double calibrate_tsc_hz(int rounds, int interval_ms);
+
+std::uint64_t measure_overhead_cycles(int samples);
+
+void clflush(const volatile void* address);
+void clflush_fence();
+
+} // namespace Timer

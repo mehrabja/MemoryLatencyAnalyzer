@@ -1,99 +1,170 @@
 #include "bandwidth_measurer.hpp"
-#include "timer.hpp"
+
 #include "settings.hpp"
-#include <sys/mman.h>
+#include "timer.hpp"
+
+#include <algorithm>
 #include <cstring>
 #include <cstdlib>
 #include <stdexcept>
+#include <utility>
+#include <vector>
+
+#include <sys/mman.h>
 
 #ifndef MAP_HUGETLB
-#define MAP_HUGETLB 0x40000 // در صورت نبود در هدرهای سیستم (kernel های خیلی قدیمی)
+#define MAP_HUGETLB 0x40000
 #endif
 
-// چون munmap برخلاف VirtualFree به سایز نیاز دارد، سایز واقعی تخصیص را هم
-// برمی‌گردانیم (برای LargePage این سایز ممکن است بزرگ‌تر از سایز درخواستی و
-// هم‌ترازشده با LARGE_PAGE_SIZE باشد).
-static char* allocate_buffer(size_t size, const std::string& method, size_t& out_alloc_size) {
-    out_alloc_size = size;
+namespace {
+
+struct Allocation {
+    char* ptr = nullptr;
+    std::size_t size = 0;
+    std::string method;
+};
+
+Allocation allocate_buffer(std::size_t requested, const std::string& method) {
+    Allocation result;
+    result.method = method;
+    result.size = requested;
+
     if (method == "malloc") {
-        return static_cast<char*>(malloc(size));
+        result.ptr = static_cast<char*>(std::malloc(requested));
+        return result;
     }
+
     if (method == "LargePage") {
-        size_t aligned = (size + Config::LARGE_PAGE_SIZE - 1) & ~(Config::LARGE_PAGE_SIZE - 1);
-        out_alloc_size = aligned;
-        // معادل VirtualAlloc(..., MEM_LARGE_PAGES, ...): نیاز به Huge Pages
-        // از قبل رزرو شده در سیستم دارد (/proc/sys/vm/nr_hugepages)؛ در غیر
-        // این صورت mmap با MAP_FAILED برمی‌گردد، درست مثل شکست بدون
-        // Administrator روی ویندوز.
-        void* p = mmap(nullptr, aligned, PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0);
-        return (p == MAP_FAILED) ? nullptr : static_cast<char*>(p);
+        result.size =
+            (requested + Config::LARGE_PAGE_SIZE - 1) &
+            ~(Config::LARGE_PAGE_SIZE - 1);
+
+        void* memory = mmap(nullptr, result.size,
+                            PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB,
+                            -1, 0);
+        result.ptr = memory == MAP_FAILED
+                         ? nullptr
+                         : static_cast<char*>(memory);
+        return result;
     }
-    // mmap معمولی (معادل VirtualAlloc ساده روی ویندوز)
-    void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    return (p == MAP_FAILED) ? nullptr : static_cast<char*>(p);
+
+    if (method == "mmap") {
+        void* memory = mmap(nullptr, requested,
+                            PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS,
+                            -1, 0);
+        result.ptr = memory == MAP_FAILED
+                         ? nullptr
+                         : static_cast<char*>(memory);
+        return result;
+    }
+
+    throw std::invalid_argument(
+        "Unknown bandwidth allocation method: " + method);
 }
 
-static void free_buffer(char* p, const std::string& method, size_t alloc_size) {
-    if (!p) return;
-    if (method == "malloc") {
-        free(p);
+void release_buffer(Allocation& allocation) {
+    if (!allocation.ptr) return;
+
+    if (allocation.method == "malloc") {
+        std::free(allocation.ptr);
     } else {
-        munmap(p, alloc_size);
+        munmap(allocation.ptr, allocation.size);
     }
+
+    allocation.ptr = nullptr;
 }
 
-BandwidthResult BandwidthMeasurer::measure(size_t size_bytes, const std::string& method) {
-    size_t src_alloc_size = 0, dst_alloc_size = 0;
-    char* src = allocate_buffer(size_bytes, method, src_alloc_size);
-    char* dst = allocate_buffer(size_bytes, method, dst_alloc_size);
+double median(std::vector<double> values) {
+    if (values.empty()) return 0.0;
+    std::sort(values.begin(), values.end());
+    return values[values.size() / 2];
+}
 
-    if (!src || !dst) {
-        free_buffer(src, method, src_alloc_size);
-        free_buffer(dst, method, dst_alloc_size);
-        throw std::runtime_error("Allocation failed: " + method);
+double gib_per_second(std::size_t bytes, std::uint64_t elapsed_ns) {
+    if (elapsed_ns == 0) return 0.0;
+
+    const double gib =
+        static_cast<double>(bytes) /
+        (1024.0 * 1024.0 * 1024.0);
+    const double seconds =
+        static_cast<double>(elapsed_ns) * 1e-9;
+
+    return gib / seconds;
+}
+
+} // namespace
+
+BandwidthResult BandwidthMeasurer::measure(
+    std::size_t size_bytes,
+    const std::string& method,
+    int repeats) {
+    if (size_bytes == 0 || repeats <= 0) {
+        throw std::invalid_argument(
+            "Bandwidth size and repeats must be positive");
     }
 
-    memset(src, 0xAA, size_bytes);
+    Allocation src = allocate_buffer(size_bytes, method);
+    Allocation dst = allocate_buffer(size_bytes, method);
 
-    const int repeats = 6;
-    uint64_t total_read = 0, total_write = 0, total_copy = 0;
+    if (!src.ptr || !dst.ptr) {
+        release_buffer(src);
+        release_buffer(dst);
+        throw std::runtime_error(
+            "Allocation failed for bandwidth method: " + method);
+    }
+
+    // First-touch is deliberately outside the timed region.
+    std::memset(src.ptr, 0xAA, size_bytes);
+    std::memset(dst.ptr, 0x55, size_bytes);
+
+    volatile unsigned char checksum = 0;
+
+    std::vector<double> read_rates;
+    std::vector<double> write_rates;
+    std::vector<double> copy_rates;
+    read_rates.reserve(static_cast<std::size_t>(repeats));
+    write_rates.reserve(static_cast<std::size_t>(repeats));
+    copy_rates.reserve(static_cast<std::size_t>(repeats));
 
     for (int r = 0; r < repeats; ++r) {
-        // Write
-        Timer::serialize();
-        uint64_t t0 = Timer::rdtsc();
-        memset(dst, 0x55, size_bytes);
-        Timer::serialize();
-        total_write += Timer::rdtsc() - t0;
+        std::uint64_t t0 = Timer::monotonic_raw_ns();
 
-        // Read
-        volatile char sink = 0;
-        Timer::serialize();
-        t0 = Timer::rdtsc();
-        for (size_t i = 0; i < size_bytes; i += 64) {
-            sink ^= src[i];
+        for (std::size_t i = 0;
+             i < size_bytes;
+             i += Config::CACHE_LINE_SIZE) {
+            checksum ^= static_cast<unsigned char>(src.ptr[i]);
         }
-        Timer::serialize();
-        total_read += Timer::rdtsc() - t0;
 
-        // Copy
-        Timer::serialize();
-        t0 = Timer::rdtsc();
-        memcpy(dst, src, size_bytes);
-        Timer::serialize();
-        total_copy += Timer::rdtsc() - t0;
+        const std::uint64_t read_ns =
+            Timer::monotonic_raw_ns() - t0;
+        read_rates.push_back(gib_per_second(size_bytes, read_ns));
+
+        t0 = Timer::monotonic_raw_ns();
+        std::memset(dst.ptr, 0x55, size_bytes);
+        const std::uint64_t write_ns =
+            Timer::monotonic_raw_ns() - t0;
+        write_rates.push_back(gib_per_second(size_bytes, write_ns));
+
+        t0 = Timer::monotonic_raw_ns();
+        std::memcpy(dst.ptr, src.ptr, size_bytes);
+        const std::uint64_t copy_ns =
+            Timer::monotonic_raw_ns() - t0;
+        copy_rates.push_back(gib_per_second(size_bytes, copy_ns));
     }
 
-    free_buffer(src, method, src_alloc_size);
-    free_buffer(dst, method, dst_alloc_size);
+    (void)checksum;
 
-    BandwidthResult res;
-    res.allocator    = method;
-    res.size_bytes   = size_bytes;
-    res.read_cycles  = static_cast<double>(total_read)  / repeats;
-    res.write_cycles = static_cast<double>(total_write) / repeats;
-    res.copy_cycles  = static_cast<double>(total_copy)  / repeats;
-    return res;
+    BandwidthResult result{
+        method,
+        size_bytes,
+        median(std::move(read_rates)),
+        median(std::move(write_rates)),
+        median(std::move(copy_rates))
+    };
+
+    release_buffer(src);
+    release_buffer(dst);
+    return result;
 }

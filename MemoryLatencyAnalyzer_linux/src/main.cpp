@@ -3,6 +3,7 @@
 #include "cpu_capability.hpp"
 #include "defensive_lab.hpp"
 #include "evaluation_lab.hpp"
+#include "operational_lab.hpp"
 #include "latency_measurer.hpp"
 #include "platform_utils.hpp"
 #include "reporter.hpp"
@@ -54,6 +55,9 @@ void print_help() {
         << "  --trace-samples N      Timing samples per class (default 2048)\n"
         << "  --trace-average N      Samples averaged per block (default 4)\n"
         << "  --evaluation-report F  Write evaluation JSON report (default evaluation_lab_report.json)\n"
+        << "  --operational-lab      Run the end-to-end defensive simulation lab\n"
+        << "  --operational-runs N   Operational lab runs (default 3)\n"
+        << "  --operational-report F Write operational JSON report (default operational_lab_report.json)\n"
         << "  --help                 Show this help\n";
 }
 
@@ -114,6 +118,7 @@ int main(int argc, char* argv[]) {
     int evaluation_runs = 3;
     int trace_samples = 2048;
     int trace_average = 4;
+    int operational_runs = 3;
 
     std::size_t buffer_size = 0;
     std::size_t bandwidth_size =
@@ -126,10 +131,12 @@ int main(int argc, char* argv[]) {
     bool run_phase5_lab = false;
     bool run_cpu_capability = false;
     bool run_evaluation_lab = false;
+    bool run_operational_lab = false;
     bool quiet = false;
     bool verbose = false;
     std::string csv_file;
     std::string evaluation_report = "evaluation_lab_report.json";
+    std::string operational_report = "operational_lab_report.json";
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
@@ -223,6 +230,19 @@ int main(int argc, char* argv[]) {
                 return 2;
             }
             evaluation_report = argv[++i];
+        } else if (arg == "--operational-lab") {
+            run_operational_lab = true;
+        } else if (arg == "--operational-runs") {
+            if (!consume_int(argc, argv, i, operational_runs) || operational_runs <= 0) {
+                std::cerr << "Invalid --operational-runs value\n";
+                return 2;
+            }
+        } else if (arg == "--operational-report") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing --operational-report filename\n";
+                return 2;
+            }
+            operational_report = argv[++i];
         } else if (arg == "--spectre-tries") {
             if (!consume_int(argc, argv, i, spectre_tries) || spectre_tries <= 0) {
                 std::cerr << "Invalid --spectre-tries value\n";
@@ -248,9 +268,39 @@ int main(int argc, char* argv[]) {
         (run_spectre_lab && spectre_lab_runs <= 0) ||
         (run_phase5_lab && phase5_runs <= 0) ||
         (run_cpu_capability && compute_seconds <= 0) ||
-        (run_evaluation_lab && (evaluation_runs <= 0 || trace_samples <= 0 || trace_average <= 0))) {
+        (run_evaluation_lab && (evaluation_runs <= 0 || trace_samples <= 0 || trace_average <= 0)) ||
+        (run_operational_lab && operational_runs <= 0)) {
         std::cerr << "Invalid numeric configuration\n";
         return 2;
+    }
+
+    if (run_operational_lab) {
+        const auto lab =
+            OperationalLab::run(
+                operational_runs,
+                operational_report);
+
+        std::cout
+            << "Operational Defensive Lab\n"
+            << "Runs: " << lab.runs << '\n'
+            << "Events generated: " << lab.events_generated << '\n'
+            << "Detection rate: " << lab.detection_rate_percent << "%\n"
+            << "Missed events: " << lab.missed_events << '\n'
+            << "False-positive rate: "
+            << lab.false_positive_rate_percent << "%\n"
+            << "Recovery rate: " << lab.recovery_rate_percent << "%\n"
+            << "Boundary: " << lab.reference_boundary << '\n'
+            << "Real network: NOT PERFORMED\n"
+            << "Real persistence: NOT PERFORMED\n"
+            << "Real privilege change: NOT PERFORMED\n"
+            << "External process access: NOT PERFORMED\n"
+            << "Report: "
+            << (lab.report_written
+                    ? lab.report_path
+                    : "FAILED")
+            << '\n';
+
+        return lab.report_written ? 0 : 1;
     }
 
     if (run_evaluation_lab) {

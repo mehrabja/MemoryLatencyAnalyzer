@@ -449,9 +449,9 @@ The pipeline performs:
 3. **MAD outlier rejection** — median absolute deviation is used instead of a mean/stddev rule so a few large excursions do not dominate the result.
 4. **SNR** — reports the absolute difference between class means relative to pooled timing noise.
 5. **Error rate** — evaluates a simple threshold classifier against the known fixed/random labels.
-6. **TVLA** — runs Welch's two-sample t-test and reports `|t|` against the API's reference threshold of 4.5.
+6. **TVLA** — runs a single-point Welch two-sample t-test and reports `|t|` against the API's reference threshold of 4.5.
 7. **Repeatability** — computes the coefficient of variation across per-run medians.
-8. **Recovery** — the lab injects one synthetic incomplete-capture fault and exercises the local retry/recovery path.
+8. **Recovery** — the lab injects one synthetic incomplete-capture fault, exercises the local retry/recovery path, and reports recovery rate.
 9. **Platform fingerprint** — records CPU brand/vendor, core topology, machine architecture, and kernel release so results from other machines can be compared later.
 
 ### Default acceptance criteria
@@ -460,6 +460,7 @@ The lab records these as engineering defaults, not universal hardware or securit
 
 - repeatability CV ≤ 10%
 - classification error ≤ 5%
+- capture recovery rate is reported; the built-in fault should recover to 100%
 - TVLA reference threshold = 4.5
 
 A TVLA threshold crossing is reported separately as `leakage_detected`; it does not automatically mean the measurement pipeline is unstable. The built-in timing fixture is intentionally data-dependent so the TVLA path can be exercised.

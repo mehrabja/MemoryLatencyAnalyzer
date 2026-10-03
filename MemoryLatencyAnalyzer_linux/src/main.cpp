@@ -1,223 +1,375 @@
-#include "latency_measurer.hpp"
 #include "bandwidth_measurer.hpp"
 #include "cpu_info.hpp"
+#include "latency_measurer.hpp"
+#include "platform_utils.hpp"
 #include "reporter.hpp"
 #include "settings.hpp"
 #include "shared_memory_measurer.hpp"
-#include "platform_utils.hpp"
-#include "spectre_v1.hpp"   // <---- در بالای فایل، کنار سایر includeها
+#include "spectre_v1.hpp"
+#include "timer.hpp"
+
+#include <algorithm>
+#include <charconv>
+#include <cstddef>
 #include <iostream>
-#include <vector>
+#include <stdexcept>
 #include <string>
-#include <cstring>
+#include <string_view>
+#include <vector>
+
+namespace {
 
 void print_help() {
-    std::cout << "Usage: latency_analyzer [options]\n"
-              << "  --rounds N         Number of full rounds (default 5)\n"
-              << "  --iterations N     Iterations per measurement (default 1000)\n"
-              << "  --warmup N         Warmup iterations (default 150)\n"
-              << "  --shm-iterations N Round-trips for the shared-memory IPC test (default 2000)\n"
-              << "  --no-shared-memory Skip the cross-process shared memory test\n"
-              << "  --csv FILE         Write results to CSV file\n"
-              << "  --quiet            Less output\n"
-              << "  --verbose          More detailed output\n"              << "  --spectre          Run Spectre Variant 1 demo and exit\n"              << "  --help             Show this help\n";
+    std::cout
+        << "Usage: latency_analyzer [options]\n\n"
+        << "Latency:\n"
+        << "  --rounds N             Independent measurement rounds (default 5)\n"
+        << "  --iterations N         Samples per round (default 1000)\n"
+        << "  --warmup N             Warmup samples per round (default 150)\n"
+        << "  --buffer-mib N         Latency buffer size in MiB (default: auto)\n\n"
+        << "Bandwidth:\n"
+        << "  --bandwidth-mib N      Streaming buffer size in MiB (default 64)\n"
+        << "  --no-bandwidth         Skip bandwidth measurements\n\n"
+        << "Shared memory:\n"
+        << "  --shm-iterations N     Cross-process round trips (default 2000)\n"
+        << "  --no-shared-memory     Skip the shared-memory test\n\n"
+        << "Output:\n"
+        << "  --csv FILE             Write latency, bandwidth and shared-memory results\n"
+        << "  --quiet                Minimal output\n"
+        << "  --verbose              Include p95/p99/stddev/min/max\n\n"
+        << "Other:\n"
+        << "  --spectre              Run the self-contained Spectre V1 demo and exit\n"
+        << "  --help                 Show this help\n";
 }
 
-int main(int argc, char* argv[]) {
-    // نقش مخفیِ consumer: این پروسه توسط خودِ برنامه (به‌عنوان producer)
-    // اجرا می‌شود تا برای تست حافظه‌ی مشترک بین دو پروسه استفاده شود.
-    // کاربر معمولی هرگز این فلگ را دستی نمی‌زند.
-    if (argc >= 3 && strcmp(argv[1], "--shm-consumer") == 0) {
-        return SharedMemoryMeasurer::run_consumer(argv[2]);
+bool parse_int(std::string_view text, int& out) {
+    if (text.empty()) return false;
+
+    int value = 0;
+    const auto [ptr, ec] = std::from_chars(
+        text.data(), text.data() + text.size(), value);
+
+    if (ec != std::errc{} ||
+        ptr != text.data() + text.size()) {
+        return false;
     }
 
-    PlatformUtils::pin_current_thread(0); // پین به هسته‌ی منطقی 0 + تلاش برای اولویت بالا
+    out = value;
+    return true;
+}
 
-    int rounds      = Config::DEFAULT_ROUNDS;
-    int iterations  = Config::DEFAULT_ITERATIONS;
-    int warmup      = Config::DEFAULT_WARMUP;
+bool consume_int(
+    int argc,
+    char* argv[],
+    int& index,
+    int& target) {
+    if (index + 1 >= argc) return false;
+    ++index;
+    return parse_int(argv[index], target);
+}
+
+bool consume_size_mib(
+    int argc,
+    char* argv[],
+    int& index,
+    std::size_t& target) {
+    int value = 0;
+    if (!consume_int(argc, argv, index, value) ||
+        value <= 0) {
+        return false;
+    }
+
+    const auto mib = static_cast<std::size_t>(value);
+    target = mib * static_cast<std::size_t>(1024) *
+             static_cast<std::size_t>(1024);
+    return true;
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    int rounds = Config::DEFAULT_ROUNDS;
+    int iterations = Config::DEFAULT_ITERATIONS;
+    int warmup = Config::DEFAULT_WARMUP;
     int shm_iterations = Config::DEFAULT_SHM_ITERATIONS;
+
+    std::size_t buffer_size = 0;
+    std::size_t bandwidth_size =
+        Config::DEFAULT_BANDWIDTH_SIZE;
+
+    bool run_bandwidth = true;
     bool run_shared_memory = true;
     bool run_spectre = false;
-    bool verbose    = false;
-    bool quiet      = false;
+    bool quiet = false;
+    bool verbose = false;
     std::string csv_file;
 
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--help") == 0) {
+        const std::string_view arg = argv[i];
+
+        if (arg == "--help") {
             print_help();
             return 0;
         }
-        else if (strcmp(argv[i], "--rounds") == 0 && i + 1 < argc)
-            rounds = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--iterations") == 0 && i + 1 < argc)
-            iterations = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--warmup") == 0 && i + 1 < argc)
-            warmup = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--shm-iterations") == 0 && i + 1 < argc)
-            shm_iterations = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--no-shared-memory") == 0)
-            run_shared_memory = false;
-        else if (strcmp(argv[i], "--spectre") == 0)
+        if (arg == "--spectre") {
             run_spectre = true;
-        else if (strcmp(argv[i], "--csv") == 0 && i + 1 < argc)
-            csv_file = argv[++i];
-        else if (strcmp(argv[i], "--verbose") == 0)
-            verbose = true;
-        else if (strcmp(argv[i], "--quiet") == 0)
+        } else if (arg == "--quiet") {
             quiet = true;
+        } else if (arg == "--verbose") {
+            verbose = true;
+        } else if (arg == "--no-bandwidth") {
+            run_bandwidth = false;
+        } else if (arg == "--no-shared-memory") {
+            run_shared_memory = false;
+        } else if (arg == "--rounds") {
+            if (!consume_int(argc, argv, i, rounds)) {
+                std::cerr << "Invalid --rounds value\n";
+                return 2;
+            }
+        } else if (arg == "--iterations") {
+            if (!consume_int(argc, argv, i, iterations)) {
+                std::cerr << "Invalid --iterations value\n";
+                return 2;
+            }
+        } else if (arg == "--warmup") {
+            if (!consume_int(argc, argv, i, warmup)) {
+                std::cerr << "Invalid --warmup value\n";
+                return 2;
+            }
+        } else if (arg == "--shm-iterations") {
+            if (!consume_int(argc, argv, i, shm_iterations)) {
+                std::cerr << "Invalid --shm-iterations value\n";
+                return 2;
+            }
+        } else if (arg == "--buffer-mib") {
+            if (!consume_size_mib(argc, argv, i, buffer_size)) {
+                std::cerr << "Invalid --buffer-mib value\n";
+                return 2;
+            }
+        } else if (arg == "--bandwidth-mib") {
+            if (!consume_size_mib(
+                    argc, argv, i, bandwidth_size)) {
+                std::cerr << "Invalid --bandwidth-mib value\n";
+                return 2;
+            }
+        } else if (arg == "--csv") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing --csv filename\n";
+                return 2;
+            }
+            csv_file = argv[++i];
+        } else {
+            std::cerr << "Unknown option: " << arg << '\n';
+            return 2;
+        }
     }
 
-    if (rounds < 1) {
-        std::cerr << "Error: --rounds باید حداقل 1 باشد.\n";
-        return 1;
+    if (rounds <= 0 ||
+        iterations <= 0 ||
+        warmup < 0 ||
+        (run_shared_memory && shm_iterations <= 0)) {
+        std::cerr << "Invalid numeric configuration\n";
+        return 2;
     }
-    if (iterations < 1) {
-        std::cerr << "Error: --iterations باید حداقل 1 باشد.\n";
-        return 1;
-    }
-    if (warmup < 0) {
-        std::cerr << "Error: --warmup نمی‌تواند منفی باشد.\n";
-        return 1;
-    }
-    if (run_shared_memory && shm_iterations < 1) {
-        std::cerr << "Error: --shm-iterations باید حداقل 1 باشد.\n";
-        return 1;
+
+    if (run_spectre) {
+        SpectreV1::run_demo();
+        return 0;
     }
 
     try {
-        if (run_spectre) {
-            SpectreV1::run_demo(999);
-            return 0;
+        const auto allowed_cpus =
+            PlatformUtils::allowed_cpus();
+
+        if (allowed_cpus.empty()) {
+            throw std::runtime_error(
+                "Unable to determine CPUs allowed to this process");
         }
+
+        const int primary_cpu = allowed_cpus.front();
+
+        if (!PlatformUtils::pin_current_thread(primary_cpu) &&
+            !quiet) {
+            std::cerr << "[warning] CPU affinity could not be set\n";
+        }
+
+        (void)PlatformUtils::raise_priority_best_effort();
+
+        const auto caches = CpuInfo::detect_caches();
+        const auto topology = CpuInfo::topology();
+        const std::size_t line_size =
+            CpuInfo::cache_line_size();
+
+        const double tsc_hz = Timer::calibrate_tsc_hz(
+            Config::TSC_CALIBRATION_ROUNDS,
+            Config::TSC_CALIBRATION_MS);
+
+        const std::size_t timer_overhead =
+            Timer::measure_overhead_cycles(2000);
 
         if (!quiet) {
-            std::cout << "=============================================\n";
-            std::cout << "   Memory Latency & Bandwidth Analyzer\n";
-            std::cout << "   (Pure Performance Measurement)\n";
-            std::cout << "=============================================\n\n";
+            std::cout
+                << "Memory Microarchitecture & Performance Analyzer\n\n";
+
+            Reporter::print_system_info(
+                CpuInfo::model_name(),
+                topology,
+                caches,
+                tsc_hz,
+                timer_overhead,
+                allowed_cpus);
         }
 
-        // اطلاعات کش
-        auto caches = CpuInfo::detect_caches();
+        LatencyMeasurer latency(buffer_size, line_size);
+        std::vector<MeasurementResult> latency_results;
+
         if (!quiet) {
-            std::cout << "Cache hierarchy:\n";
-            for (const auto& c : caches) {
-                std::cout << "  L" << c.level << " (" << c.type << "): "
-                          << (c.size_bytes / 1024.0) << " KB, line "
-                          << c.line_size << " B\n";
-            }
-            std::cout << "\n";
+            std::cout
+                << "[1/4] Measuring cache and access latency...\n";
         }
 
-        // هشدار Hyper-Threading
-        if (CpuInfo::has_hyperthreading() && !quiet) {
-            std::cout << "[!] Hyper-Threading فعال است.\n"
-                      << "    برای دقت بیشتر affinity روی یک هسته تنظیم شده.\n\n";
-        }
+        latency_results.push_back(
+            latency.measure_hit(
+                iterations, warmup, rounds));
 
-        double freq = CpuInfo::estimate_cpu_freq_ghz();
-        if (!quiet) {
-            std::cout << "Estimated CPU frequency: " << freq << " GHz\n\n";
-        }
+        latency_results.push_back(
+            latency.measure_forced_miss(
+                iterations, warmup, rounds));
 
-        LatencyMeasurer measurer;
+        latency_results.push_back(
+            latency.measure_store(
+                iterations, warmup, rounds));
 
-        std::vector<MeasurementResult> all_results;
-        std::vector<MeasurementResult> hit_rounds;
-        std::vector<MeasurementResult> miss_rounds;
-
-        // چند دور latency
-        for (int r = 0; r < rounds; ++r) {
-            if (!quiet) std::cout << "Round " << (r + 1) << "/" << rounds << " ...\n";
-
-            hit_rounds.push_back(measurer.measure_hit(iterations, warmup));
-            miss_rounds.push_back(measurer.measure_miss(iterations, warmup, Config::DEFAULT_STRIDE));
-        }
-
-        auto average_rounds = [](const std::vector<MeasurementResult>& rounds, const std::string& label) {
-            MeasurementResult avg{};
-            avg.label = label;
-            for (const auto& r : rounds) {
-                avg.mean_cycles   += r.mean_cycles;
-                avg.stddev_cycles += r.stddev_cycles;
-                avg.min_cycles    += r.min_cycles;
-                avg.max_cycles    += r.max_cycles;
-            }
-            size_t n = rounds.size();
-            avg.mean_cycles   /= n;
-            avg.stddev_cycles /= n;
-            avg.min_cycles    /= static_cast<uint64_t>(n);
-            avg.max_cycles    /= static_cast<uint64_t>(n);
-            return avg;
+        const std::vector<std::size_t> strides{
+            64, 256, 1024, 4096, 16384
         };
 
-        all_results.push_back(average_rounds(hit_rounds, "Cache Hit (averaged)"));
-        all_results.push_back(average_rounds(miss_rounds, "Cache Miss (averaged)"));
+        const int stride_iterations =
+            std::max(1, iterations / 2);
+        const int stride_warmup = warmup / 2;
 
-        // Load vs Store
-        all_results.push_back(measurer.measure_load(iterations, warmup));
-        all_results.push_back(measurer.measure_store(iterations, warmup));
+        const auto stride_results =
+            latency.measure_strides(
+                strides,
+                stride_iterations,
+                stride_warmup,
+                rounds);
 
-        // Strideهای مختلف
-        std::vector<size_t> strides = {64, 256, 1024, 4096, 16384};
-        auto stride_results = measurer.measure_strides(strides, iterations / 2, warmup / 2);
-        all_results.insert(all_results.end(), stride_results.begin(), stride_results.end());
+        latency_results.insert(
+            latency_results.end(),
+            stride_results.begin(),
+            stride_results.end());
 
-        // Bandwidth
-        if (!quiet) std::cout << "\n[+] Measuring bandwidth...\n";
-        std::vector<BandwidthResult> bw_results;
+        std::vector<BandwidthResult> bandwidth_results;
 
-        try {
-            bw_results.push_back(BandwidthMeasurer::measure(64 * 1024 * 1024, "mmap"));
-            bw_results.push_back(BandwidthMeasurer::measure(64 * 1024 * 1024, "malloc"));
+        if (run_bandwidth) {
+            if (!quiet) {
+                std::cout
+                    << "[2/4] Measuring bandwidth...\n";
+            }
 
-            try {
-                bw_results.push_back(BandwidthMeasurer::measure(64 * 1024 * 1024, "LargePage"));
-            } catch (...) {
-                if (!quiet) {
-                    std::cout << "  Large Pages در دسترس نیست (نیاز به رزرو hugepage در سیستم، مثلاً:"
-                              << " echo 64 | sudo tee /proc/sys/vm/nr_hugepages)\n";
+            const std::vector<std::string> methods{
+                "mmap", "malloc"
+            };
+
+            for (const auto& method : methods) {
+                try {
+                    bandwidth_results.push_back(
+                        BandwidthMeasurer::measure(
+                            bandwidth_size,
+                            method,
+                            Config::BANDWIDTH_REPEATS));
+                } catch (const std::exception& ex) {
+                    if (!quiet) {
+                        std::cerr << "  "
+                                  << method << ": "
+                                  << ex.what() << '\n';
+                    }
                 }
             }
-        } catch (const std::exception& e) {
-            std::cerr << "Bandwidth error: " << e.what() << "\n";
+
+            try {
+                bandwidth_results.push_back(
+                    BandwidthMeasurer::measure(
+                        bandwidth_size,
+                        "LargePage",
+                        Config::BANDWIDTH_REPEATS));
+            } catch (const std::exception&) {
+                if (!quiet) {
+                    std::cout
+                        << "  LargePage: unavailable; "
+                           "requires pre-reserved 2 MiB Huge Pages.\n";
+                }
+            }
         }
 
-        // حافظه‌ی مشترک بین دو پروسه (Shared Memory / cross-process IPC)
+        SharedMemoryResult shared_memory;
+
         if (run_shared_memory) {
-            if (!quiet) std::cout << "\n[+] Measuring cross-process shared memory latency...\n";
-            SharedMemoryResult shm = SharedMemoryMeasurer::measure_cross_process(shm_iterations, Config::DEFAULT_SHM_WARMUP);
-            if (shm.success) {
-                MeasurementResult shm_as_result{
-                    shm.mean_cycles,
-                    shm.stddev_cycles,
-                    shm.min_cycles,
-                    shm.max_cycles,
-                    "Shared Memory Round-Trip (2 processes, " + std::to_string(shm.iterations) + " ping-pongs)"
-                };
-                all_results.push_back(shm_as_result);
-            } else if (!quiet) {
-                std::cout << "  تست حافظه‌ی مشترک ناموفق بود: " << shm.error_message << "\n";
-            }
-        }
-
-        // چاپ نتایج
-        Reporter::print_console(all_results, freq, verbose);
-        Reporter::print_bandwidth(bw_results, freq);
-
-        // ذخیره فایل
-        if (!csv_file.empty()) {
-            Reporter::write_csv(csv_file, all_results, freq);
-            Reporter::append_history("history.csv", all_results);
             if (!quiet) {
-                std::cout << "\nنتایج در فایل ذخیره شد: " << csv_file << "\n";
-                std::cout << "تاریخچه در فایل history.csv ذخیره شد.\n";
+                std::cout
+                    << "[3/4] Measuring cross-process shared memory...\n";
+            }
+
+            if (allowed_cpus.size() < 2) {
+                shared_memory.error_message =
+                    "Only one CPU is available to this process";
+            } else {
+                const int secondary_cpu =
+                    CpuInfo::choose_distinct_cpu(
+                        primary_cpu, allowed_cpus);
+
+                shared_memory =
+                    SharedMemoryMeasurer::measure_cross_process(
+                        shm_iterations,
+                        Config::DEFAULT_SHM_WARMUP,
+                        primary_cpu,
+                        secondary_cpu);
             }
         }
 
+        if (!quiet) {
+            std::cout << "[4/4] Reporting...\n\n";
+            Reporter::print_latency(
+                latency_results, tsc_hz, verbose);
+            Reporter::print_bandwidth(
+                bandwidth_results);
+
+            if (run_shared_memory) {
+                Reporter::print_shared_memory(
+                    shared_memory, tsc_hz, verbose);
+            }
+        }
+
+        if (!csv_file.empty()) {
+            if (!Reporter::write_csv(
+                    csv_file,
+                    latency_results,
+                    bandwidth_results,
+                    run_shared_memory
+                        ? &shared_memory
+                        : nullptr,
+                    tsc_hz)) {
+                std::cerr
+                    << "Failed to write CSV: "
+                    << csv_file << '\n';
+                return 1;
+            }
+
+            (void)Reporter::append_history(
+                "history.csv",
+                latency_results,
+                bandwidth_results);
+
+            if (!quiet) {
+                std::cout
+                    << "Results written to "
+                    << csv_file
+                    << " (history: history.csv)\n";
+            }
+        }
     } catch (const std::exception& ex) {
-        std::cerr << "Error: " << ex.what() << std::endl;
+        std::cerr << "Error: " << ex.what() << '\n';
         return 1;
     }
 

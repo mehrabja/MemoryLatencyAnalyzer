@@ -174,6 +174,7 @@ Run it with:
 
 ~~~bash
 ./latency_analyzer --spectre
+./latency_analyzer --spectre-lab --lab-runs 5 --spectre-tries 999
 ~~~
 
 A successful leak is not guaranteed. CPU design, operating-system mitigations, virtualization, compiler behavior, and other environmental factors can prevent the side channel from being observable.
@@ -238,6 +239,8 @@ Output:
 Other:
   --spectre              Run the self-contained Spectre V1 demo and exit
   --spectre-tries N      Attempts per leaked byte (default 999)
+  --spectre-lab          Repeat the self-contained Spectre demo for reliability analysis
+  --lab-runs N           Independent Spectre lab runs (default 5)
   --help                 Show this help
 ~~~
 
@@ -393,6 +396,24 @@ Known boundaries include:
 7. Cross-process atomics rely on lock-free x86/Linux behavior for the shared mapping.
 8. Interrupts, scheduler activity, NUMA placement, and power management can affect results.
 9. The implementation is intentionally x86-specific.
+
+---
+
+## Controlled Spectre reliability lab
+
+The repository also includes a research harness for the built-in Spectre fixture:
+
+~~~bash
+./latency_analyzer --spectre-lab --lab-runs 5 --spectre-tries 999
+~~~
+
+It repeats the same in-process synthetic target and reports:
+
+- exact recovery rate across independent runs
+- aggregate byte accuracy
+- bytes that were correct in every run
+
+This is deliberately restricted to the program's own synthetic secret. It does not accept PIDs, executable paths, arbitrary addresses, or data from other processes.
 
 ---
 

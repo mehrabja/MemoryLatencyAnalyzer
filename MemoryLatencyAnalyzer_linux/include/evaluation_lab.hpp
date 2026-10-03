@@ -64,6 +64,7 @@ struct EvaluationLabResult {
     TvlaResult tvla;
 
     bool repeatability_ok = false;
+    bool leakage_detected = false;
     bool criteria_documented = true;
 
     PlatformSignature platform;

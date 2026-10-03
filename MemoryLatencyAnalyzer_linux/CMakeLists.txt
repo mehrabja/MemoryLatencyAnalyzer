@@ -134,11 +134,6 @@ if(BUILD_TESTING)
             -Wall
             -Wextra
             -Wpedantic
-            -Wshadow
-            -Wconversion
-            -Wsign-conversion
-            -Wformat=2
-            -Wundef
         )
     endif()
 

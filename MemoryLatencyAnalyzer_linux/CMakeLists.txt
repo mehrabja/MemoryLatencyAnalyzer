@@ -26,6 +26,7 @@ add_executable(latency_analyzer
     src/reporter.cpp
     src/platform_utils.cpp
     src/spectre_v1.cpp
+    src/spectre_meltdown_reference.cpp
     src/defensive_lab.cpp
     src/cpu_capability.cpp
     src/evaluation_lab.cpp
@@ -85,6 +86,36 @@ endif()
 include(CTest)
 
 if(BUILD_TESTING)
+    add_executable(
+        spectre_meltdown_reference_test
+        tests/spectre_meltdown_reference_test.cpp
+        src/spectre_meltdown_reference.cpp
+    )
+
+    target_include_directories(
+        spectre_meltdown_reference_test PRIVATE
+        include
+    )
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(spectre_meltdown_reference_test PRIVATE
+            -O2
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wshadow
+            -Wconversion
+            -Wsign-conversion
+            -Wformat=2
+            -Wundef
+        )
+    endif()
+
+    add_test(
+        NAME spectre_meltdown_reference_test
+        COMMAND spectre_meltdown_reference_test
+    )
+
     add_executable(
         numa_test
         tests/numa_test.cpp

@@ -639,7 +639,6 @@ MlcComparisonReport MlcComparison::run(
                         mlc_output, delay);
 
                 std::atomic<bool> stop{false};
-                volatile std::uint64_t sink = 0;
                 std::vector<Worker> workers;
                 if (!cpus.empty()) {
                     const std::size_t per_worker =

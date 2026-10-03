@@ -307,6 +307,7 @@ MemoryLatencyAnalyzer/
     ├── include/
     │   ├── bandwidth_measurer.hpp
     │   ├── defensive_lab.hpp
+    │   ├── cpu_capability.hpp
     │   ├── cpu_info.hpp
     │   ├── latency_measurer.hpp
     │   ├── platform_utils.hpp
@@ -319,6 +320,7 @@ MemoryLatencyAnalyzer/
     ├── src/
     │   ├── bandwidth_measurer.cpp
     │   ├── defensive_lab.cpp
+    │   ├── cpu_capability.cpp
     │   ├── cpu_info.cpp
     │   ├── latency_measurer.cpp
     │   ├── main.cpp
@@ -420,6 +422,31 @@ It repeats the same in-process synthetic target and reports:
 - bytes that were correct in every run
 
 This is deliberately restricted to the program's own synthetic secret. It does not accept PIDs, executable paths, arbitrary addresses, or data from other processes.
+
+---
+
+## CPU capability profiler
+
+A separate CPU profiling mode detects the processor identity and measures a short single-thread compute workload.
+
+Run:
+
+~~~bash
+./latency_analyzer --cpu-capability
+./latency_analyzer --cpu-capability --compute-seconds 3
+~~~
+
+It reports:
+
+- CPU vendor and full brand/model string
+- CPUID family, model, and stepping
+- physical cores, logical threads, packages, and SMT state
+- detected SSE/SSE2/SSE4.2/AVX/AVX2/AVX-512F support
+- available maximum-frequency information
+- measured floating-point throughput in GFLOP/s
+- measured integer throughput in GIntOps/s
+
+The compute numbers are measured single-thread throughput for this benchmark. They are not the vendor's theoretical peak and should be compared only under similar system conditions.
 
 ---
 

@@ -469,7 +469,7 @@ std::string MlcComparison::find_mlc() {
 
 std::optional<double> MlcComparison::parse_idle_latency_ns(
     std::string_view output) {
-    std::istringstream stream(std::string(output));
+    std::istringstream stream{std::string(output)};
     std::string line;
     while (std::getline(stream, line)) {
         const auto marker = line.find("Each iteration took");
@@ -501,7 +501,7 @@ std::optional<double> MlcComparison::parse_idle_latency_ns(
 std::optional<double> MlcComparison::parse_loaded_latency_ns(
     std::string_view output,
     std::uint64_t delay_cycles) {
-    std::istringstream stream(std::string(output));
+    std::istringstream stream{std::string(output)};
     std::string line;
 
     while (std::getline(stream, line)) {
@@ -553,6 +553,10 @@ MlcComparisonReport MlcComparison::run(
                     std::max(1, rounds));
             const std::uint64_t overhead =
                 Timer::measure_overhead_cycles(2000);
+            const double tsc_hz =
+                Timer::calibrate_tsc_hz(
+                    Config::TSC_CALIBRATION_ROUNDS,
+                    Config::TSC_CALIBRATION_MS);
 
             const double ours_idle =
                 measure_ring_latency(
@@ -574,9 +578,7 @@ MlcComparisonReport MlcComparison::run(
             point.ours_ns =
                 ours_idle *
                 1e9 /
-                Timer::calibrate_tsc_hz(
-                    Config::TSC_CALIBRATION_ROUNDS,
-                    Config::TSC_CALIBRATION_MS);
+                tsc_hz;
             if (parsed_idle) {
                 point.delay_cycles = 0U;
                 point.mlc_ns = *parsed_idle;

@@ -178,6 +178,20 @@ int main(int argc, char* argv[]) {
     bool run_operational_lab = false;
     bool quiet = false;
     bool verbose = false;
+    bool run_mlc_compare = false;
+    std::size_t mlc_buffer_size =
+        static_cast<std::size_t>(256U) *
+        static_cast<std::size_t>(1024U) *
+        static_cast<std::size_t>(1024U);
+    std::size_t mlc_load_size =
+        static_cast<std::size_t>(256U) *
+        static_cast<std::size_t>(1024U) *
+        static_cast<std::size_t>(1024U);
+    std::vector<std::uint64_t> mlc_delays{
+        0U, 100U, 800U, 4000U
+    };
+    std::string mlc_csv_file = "mlc_comparison.csv";
+    std::string mlc_json_file = "mlc_comparison.json";
     std::string csv_file;
     std::string evaluation_report = "evaluation_lab_report.json";
     std::string operational_report = "operational_lab_report.json";
@@ -199,6 +213,36 @@ int main(int argc, char* argv[]) {
             run_bandwidth = false;
         } else if (arg == "--no-shared-memory") {
             run_shared_memory = false;
+        } else if (arg == "--mlc-compare") {
+            run_mlc_compare = true;
+        } else if (arg == "--mlc-buffer-mib") {
+            if (!consume_size_mib(argc, argv, i, mlc_buffer_size)) {
+                std::cerr << "Invalid --mlc-buffer-mib value\n";
+                return 2;
+            }
+        } else if (arg == "--mlc-load-mib") {
+            if (!consume_size_mib(argc, argv, i, mlc_load_size)) {
+                std::cerr << "Invalid --mlc-load-mib value\n";
+                return 2;
+            }
+        } else if (arg == "--mlc-delays") {
+            if (i + 1 >= argc ||
+                !parse_delay_list(argv[++i], mlc_delays)) {
+                std::cerr << "Invalid --mlc-delays value\n";
+                return 2;
+            }
+        } else if (arg == "--mlc-csv") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing --mlc-csv filename\n";
+                return 2;
+            }
+            mlc_csv_file = argv[++i];
+        } else if (arg == "--mlc-json") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing --mlc-json filename\n";
+                return 2;
+            }
+            mlc_json_file = argv[++i];
         } else if (arg == "--rounds") {
             if (!consume_int(argc, argv, i, rounds)) {
                 std::cerr << "Invalid --rounds value\n";
@@ -320,7 +364,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (run_mlc_compare) {
-        const allowed_cpus = PlatformUtils::allowed_cpus();
+        const auto allowed_cpus = PlatformUtils::allowed_cpus();
         if (allowed_cpus.empty()) {
             std::cerr
                 << "MLC comparison unavailable: no allowed CPU was found\n";

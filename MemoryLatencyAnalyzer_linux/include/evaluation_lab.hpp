@@ -107,6 +107,7 @@ struct EvaluationLabResult {
     double repeatability_icc = 0.0;
 
     TvlaResult tvla;
+    TvlaResult tvla_clean;
     std::vector<TvlaResult> round_tvla;
     MultipleTestingMethod multiple_testing_method =
         MultipleTestingMethod::BenjaminiHochberg;
@@ -162,7 +163,8 @@ BootstrapSummary bootstrap_ci(
 
 double snr_linear(
     const std::vector<double>& first,
-    const std::vector<double>& second);
+    const std::vector<double>& second,
+    OutlierMethod method = OutlierMethod::MAD);
 
 double classification_error_rate(
     const std::vector<double>& fixed_samples,

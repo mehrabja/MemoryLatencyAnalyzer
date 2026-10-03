@@ -29,6 +29,7 @@ add_executable(latency_analyzer
     src/defensive_lab.cpp
     src/cpu_capability.cpp
     src/evaluation_lab.cpp
+    src/operational_lab.cpp
 )
 
 target_include_directories(latency_analyzer PRIVATE

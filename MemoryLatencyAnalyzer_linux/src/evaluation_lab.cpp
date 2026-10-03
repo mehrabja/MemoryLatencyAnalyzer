@@ -129,10 +129,7 @@ std::vector<double> collect_trace(
             static_cast<double>(end - start));
     }
 
-    if (sink == 0xFFFFFFFFFFFFFFFFULL) {
-        trace.push_back(0.0);
-    }
-
+    (void)sink;
     return trace;
 }
 
@@ -168,7 +165,7 @@ std::vector<ControlEvaluation> control_matrix() {
         },
         {
             "Least privilege",
-            "simulated protected-resource access",
+            "simulated protected-resource access path",
             "deny access",
             "synthetic authorization event only",
             false
@@ -178,6 +175,27 @@ std::vector<ControlEvaluation> control_matrix() {
             "simulated command-channel pattern",
             "generate observable network telemetry",
             "synthetic event only; no command channel exists",
+            false
+        },
+        {
+            "Persistence monitoring",
+            "simulated persistence attempt",
+            "alert and retain an audit event",
+            "synthetic event only; no persistence mechanism is created",
+            false
+        },
+        {
+            "Stealth/evasion monitoring",
+            "simulated defense-evasion indicator",
+            "raise a reviewable signal",
+            "synthetic event only; no evasion logic is executed",
+            false
+        },
+        {
+            "Data-flow monitoring",
+            "simulated sensitive-data path",
+            "track source-to-sink movement",
+            "synthetic event only; data remains local",
             false
         },
     };
@@ -199,6 +217,10 @@ bool write_report(
     out << "  \"trace_samples\": " << result.trace_samples << ",\n";
     out << "  \"averaging_window\": "
         << result.averaging_window << ",\n";
+    out << "  \"simulated_capture_faults\": "
+        << result.simulated_capture_faults << ",\n";
+    out << "  \"recovered_captures\": "
+        << result.recovered_captures << ",\n";
     out << "  \"aligned_samples\": "
         << result.aligned_samples << ",\n";
     out << "  \"alignment_loss_percent\": "
@@ -540,6 +562,27 @@ EvaluationLabResult EvaluationLab::run(
                 true,
                 true,
                 rng);
+
+        if (run == 0 && fixed.size() > 8U) {
+            ++result.simulated_capture_faults;
+            fixed.resize(
+                fixed.size() - 8U);
+
+            const auto recovery =
+                collect_trace(
+                    8U,
+                    false,
+                    true,
+                    rng);
+            fixed.insert(
+                fixed.end(),
+                recovery.begin(),
+                recovery.end());
+            if (fixed.size() ==
+                static_cast<std::size_t>(trace_samples)) {
+                ++result.recovered_captures;
+            }
+        }
 
         const auto fixed_averaged =
             Evaluation::average_blocks(

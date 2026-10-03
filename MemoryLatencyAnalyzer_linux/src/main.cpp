@@ -6,6 +6,7 @@
 #include "operational_lab.hpp"
 #include "latency_measurer.hpp"
 #include "platform_utils.hpp"
+#include "pmu_counters.hpp"
 #include "reporter.hpp"
 #include "settings.hpp"
 #include "shared_memory_measurer.hpp"
@@ -40,7 +41,7 @@ void print_help() {
         << "Output:\n"
         << "  --csv FILE             Write latency, bandwidth and shared-memory results\n"
         << "  --quiet                Minimal output\n"
-        << "  --verbose              Include p95/p99/stddev/min/max\n\n"
+        << "  --verbose              Include p95/p99/stddev/min/max\n        << "  --pmu                  Enable Linux perf_event_open PMU counters\n\n"
         << "Other:\n"
         << "  --spectre              Run the self-contained Spectre V1 demo and exit\n"
         << "  --spectre-tries N      Attempts per leaked byte (default 999)\n"
@@ -134,6 +135,7 @@ int main(int argc, char* argv[]) {
     bool run_operational_lab = false;
     bool quiet = false;
     bool verbose = false;
+    bool enable_pmu = false;
     std::string csv_file;
     std::string evaluation_report = "evaluation_lab_report.json";
     std::string operational_report = "operational_lab_report.json";
@@ -155,6 +157,8 @@ int main(int argc, char* argv[]) {
             run_bandwidth = false;
         } else if (arg == "--no-shared-memory") {
             run_shared_memory = false;
+        } else if (arg == "--pmu") {
+            enable_pmu = true;
         } else if (arg == "--rounds") {
             if (!consume_int(argc, argv, i, rounds)) {
                 std::cerr << "Invalid --rounds value\n";

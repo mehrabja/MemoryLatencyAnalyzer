@@ -34,72 +34,60 @@ void Reporter::print_system_info(
     double tsc_hz,
     std::size_t timer_overhead_cycles,
     const std::vector<int>& allowed_cpus) {
-    std::cout << "CPU: " << cpu_model << '
-'
-              << "Logical CPUs allowed: " << allowed_cpus.size() << '
-'
-              << "Physical cores: " << topology.physical_cores
-              << " | Packages: " << topology.packages
-              << " | SMT active: "
-              << (topology.smt_active ? "yes" : "no") << '
-'
-              << "TSC rate: " << std::fixed << std::setprecision(3)
-              << (tsc_hz / 1e9) << " GHz
-"
-              << "Timing overhead: " << timer_overhead_cycles
-              << " cycles
-";
+    std::cout
+        << "CPU: " << cpu_model << '\n'
+        << "Logical CPUs allowed: " << allowed_cpus.size() << '\n'
+        << "Physical cores: " << topology.physical_cores
+        << " | Packages: " << topology.packages
+        << " | SMT active: "
+        << (topology.smt_active ? "yes" : "no") << '\n'
+        << "TSC rate: " << std::fixed << std::setprecision(3)
+        << (tsc_hz / 1e9) << " GHz\n"
+        << "Timing overhead: " << timer_overhead_cycles
+        << " cycles\n";
 
-    std::cout << "Cache hierarchy:
-";
+    std::cout << "Cache hierarchy:\n";
     for (const auto& cache : caches) {
-        std::cout << "  L" << cache.level << ' '
-                  << cache.type << ": "
-                  << (static_cast<double>(cache.size_bytes) / 1024.0)
-                  << " KiB, line " << cache.line_size << " B
-";
+        std::cout
+            << "  L" << cache.level << ' '
+            << cache.type << ": "
+            << (static_cast<double>(cache.size_bytes) / 1024.0)
+            << " KiB, line " << cache.line_size << " B\n";
     }
-    std::cout << '
-';
+
+    std::cout << '\n';
 }
 
 void Reporter::print_latency(
     const std::vector<MeasurementResult>& results,
     double tsc_hz,
     bool verbose) {
-    std::cout << "===== Latency / access cost =====
-";
+    std::cout << "===== Latency / access cost =====\n";
 
     for (const auto& result : results) {
         const auto& s = result.stats;
 
-        std::cout << result.label << '
-'
-                  << "  mean   : "
-                  << std::fixed << std::setprecision(2)
-                  << s.mean << " cycles ("
-                  << cycles_to_ns(s.mean, tsc_hz) << " ns)
-"
-                  << "  median : "
-                  << s.median << " cycles ("
-                  << cycles_to_ns(s.median, tsc_hz) << " ns)
-";
+        std::cout
+            << result.label << '\n'
+            << "  mean   : "
+            << std::fixed << std::setprecision(2)
+            << s.mean << " cycles ("
+            << cycles_to_ns(s.mean, tsc_hz) << " ns)\n"
+            << "  median : "
+            << s.median << " cycles ("
+            << cycles_to_ns(s.median, tsc_hz) << " ns)\n";
 
         if (verbose) {
-            std::cout << "  p95    : " << s.p95 << " cycles
-"
-                      << "  p99    : " << s.p99 << " cycles
-"
-                      << "  stddev : " << s.stddev << " cycles
-"
-                      << "  min/max: " << s.min << " / "
-                      << s.max << " cycles
-";
+            std::cout
+                << "  p95    : " << s.p95 << " cycles\n"
+                << "  p99    : " << s.p99 << " cycles\n"
+                << "  stddev : " << s.stddev << " cycles\n"
+                << "  min/max: " << s.min << " / "
+                << s.max << " cycles\n";
         }
 
-        std::cout << "  samples: " << s.count << "
-
-";
+        std::cout
+            << "  samples: " << s.count << "\n\n";
     }
 }
 
@@ -107,22 +95,18 @@ void Reporter::print_bandwidth(
     const std::vector<BandwidthResult>& results) {
     if (results.empty()) return;
 
-    std::cout << "===== Bandwidth =====
-";
-    for (const auto& result : results) {
-        std::cout << result.allocator
-                  << " (" << std::fixed << std::setprecision(2)
-                  << (static_cast<double>(result.size_bytes) /
-                      (1024.0 * 1024.0))
-                  << " MiB)
-"
-                  << "  read : " << result.read_gb_s << " GiB/s
-"
-                  << "  write: " << result.write_gb_s << " GiB/s
-"
-                  << "  copy : " << result.copy_gb_s << " GiB/s
+    std::cout << "===== Bandwidth =====\n";
 
-";
+    for (const auto& result : results) {
+        std::cout
+            << result.allocator
+            << " (" << std::fixed << std::setprecision(2)
+            << (static_cast<double>(result.size_bytes) /
+                (1024.0 * 1024.0))
+            << " MiB)\n"
+            << "  read : " << result.read_gb_s << " GiB/s\n"
+            << "  write: " << result.write_gb_s << " GiB/s\n"
+            << "  copy : " << result.copy_gb_s << " GiB/s\n\n";
     }
 }
 
@@ -131,35 +115,32 @@ void Reporter::print_shared_memory(
     double tsc_hz,
     bool verbose) {
     if (!result.success) {
-        std::cout << "Shared memory test: "
-                  << result.error_message << '
-';
+        std::cout
+            << "Shared memory test: "
+            << result.error_message << '\n';
         return;
     }
 
-    std::cout << "===== Cross-process shared memory =====
-"
-              << "producer CPU: " << result.producer_cpu
-              << " | consumer CPU: " << result.consumer_cpu << '
-'
-              << "round trip: " << std::fixed << std::setprecision(2)
-              << result.stats.mean << " cycles ("
-              << cycles_to_ns(result.stats.mean, tsc_hz)
-              << " ns), median "
-              << result.stats.median << " cycles
-";
+    std::cout
+        << "===== Cross-process shared memory =====\n"
+        << "producer CPU: " << result.producer_cpu
+        << " | consumer CPU: " << result.consumer_cpu << '\n'
+        << "round trip: " << std::fixed << std::setprecision(2)
+        << result.stats.mean << " cycles ("
+        << cycles_to_ns(result.stats.mean, tsc_hz)
+        << " ns), median "
+        << result.stats.median << " cycles\n";
 
     if (verbose) {
-        std::cout << "p95: " << result.stats.p95
-                  << " | p99: " << result.stats.p99
-                  << " | min/max: " << result.stats.min
-                  << "/" << result.stats.max << " cycles
-";
+        std::cout
+            << "p95: " << result.stats.p95
+            << " | p99: " << result.stats.p99
+            << " | min/max: " << result.stats.min
+            << "/" << result.stats.max << " cycles\n";
     }
 
-    std::cout << "samples: " << result.stats.count << "
-
-";
+    std::cout
+        << "samples: " << result.stats.count << "\n\n";
 }
 
 bool Reporter::write_csv(
@@ -171,53 +152,54 @@ bool Reporter::write_csv(
     std::ofstream file(filename);
     if (!file) return false;
 
-    file << "Type,Label,Samples,MeanCycles,MedianCycles,P95Cycles,"
-            "P99Cycles,StdDevCycles,MinCycles,MaxCycles,MeanNanoseconds,"
-            "ReadGiBps,WriteGiBps,CopyGiBps,Allocator,Bytes
-";
+    file
+        << "Type,Label,Samples,MeanCycles,MedianCycles,P95Cycles,"
+           "P99Cycles,StdDevCycles,MinCycles,MaxCycles,MeanNanoseconds,"
+           "ReadGiBps,WriteGiBps,CopyGiBps,Allocator,Bytes\n";
 
     for (const auto& result : latency) {
         const auto& s = result.stats;
-        file << "latency,"" << result.label << "","
-             << s.count << ','
-             << s.mean << ','
-             << s.median << ','
-             << s.p95 << ','
-             << s.p99 << ','
-             << s.stddev << ','
-             << s.min << ','
-             << s.max << ','
-             << cycles_to_ns(s.mean, tsc_hz)
-             << ",,,,,
-";
+
+        file
+            << "latency,\"" << result.label << "\","
+            << s.count << ','
+            << s.mean << ','
+            << s.median << ','
+            << s.p95 << ','
+            << s.p99 << ','
+            << s.stddev << ','
+            << s.min << ','
+            << s.max << ','
+            << cycles_to_ns(s.mean, tsc_hz)
+            << ",,,,,\n";
     }
 
     for (const auto& result : bandwidth) {
-        file << "bandwidth,"" << result.allocator
-             << "",,,,,,,,,,"
-             << result.read_gb_s << ','
-             << result.write_gb_s << ','
-             << result.copy_gb_s << ",""
-             << result.allocator << "","
-             << result.size_bytes << '
-';
+        file
+            << "bandwidth,\"" << result.allocator
+            << "\",,,,,,,,,,"
+            << result.read_gb_s << ','
+            << result.write_gb_s << ','
+            << result.copy_gb_s << ",\""
+            << result.allocator << "\","
+            << result.size_bytes << '\n';
     }
 
     if (shared_memory && shared_memory->success) {
         const auto& s = shared_memory->stats;
 
-        file << "shared_memory,"Cross-process round trip","
-             << s.count << ','
-             << s.mean << ','
-             << s.median << ','
-             << s.p95 << ','
-             << s.p99 << ','
-             << s.stddev << ','
-             << s.min << ','
-             << s.max << ','
-             << cycles_to_ns(s.mean, tsc_hz)
-             << ",,,,,
-";
+        file
+            << "shared_memory,\"Cross-process round trip\","
+            << s.count << ','
+            << s.mean << ','
+            << s.median << ','
+            << s.p95 << ','
+            << s.p99 << ','
+            << s.stddev << ','
+            << s.min << ','
+            << s.max << ','
+            << cycles_to_ns(s.mean, tsc_hz)
+            << ",,,,,\n";
     }
 
     return true;
@@ -230,24 +212,22 @@ bool Reporter::append_history(
     std::ofstream file(filename, std::ios::app);
     if (!file) return false;
 
-    file << timestamp() << '
-';
+    file << timestamp() << '\n';
 
     for (const auto& result : latency) {
-        file << "latency,"" << result.label
-             << ""," << result.stats.median << '
-';
+        file
+            << "latency,\"" << result.label
+            << "\"," << result.stats.median << '\n';
     }
 
     for (const auto& result : bandwidth) {
-        file << "bandwidth," << result.allocator << ','
-             << result.read_gb_s << ','
-             << result.write_gb_s << ','
-             << result.copy_gb_s << '
-';
+        file
+            << "bandwidth," << result.allocator << ','
+            << result.read_gb_s << ','
+            << result.write_gb_s << ','
+            << result.copy_gb_s << '\n';
     }
 
-    file << "----
-";
+    file << "----\n";
     return true;
 }

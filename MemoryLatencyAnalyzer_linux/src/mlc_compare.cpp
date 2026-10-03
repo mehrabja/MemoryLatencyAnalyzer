@@ -20,6 +20,7 @@
 #include <optional>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -325,10 +326,13 @@ std::string csv_escape(const std::string& value) {
 
     if (!quote) return value;
 
-    std::string escaped{"""};
+    std::string escaped{"\"" };
     for (const char ch : value) {
-        if (ch == '"') escaped += """";
-        else escaped += ch;
+        if (ch == '"') {
+            escaped += "\"\"";
+        } else {
+            escaped += ch;
+        }
     }
     escaped += '"';
     return escaped;
@@ -683,9 +687,7 @@ MlcComparisonReport MlcComparison::run(
                 loaded.ours_ns =
                     ours_cycles *
                     1e9 /
-                    Timer::calibrate_tsc_hz(
-                        Config::TSC_CALIBRATION_ROUNDS,
-                        Config::TSC_CALIBRATION_MS);
+                    tsc_hz;
 
                 if (mlc_latency) {
                     loaded.mlc_ns = *mlc_latency;

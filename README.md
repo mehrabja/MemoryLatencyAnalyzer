@@ -312,6 +312,7 @@ MemoryLatencyAnalyzer/
     ├── include/
     │   ├── bandwidth_measurer.hpp
     │   ├── evaluation_lab.hpp
+    │   ├── operational_lab.hpp
     │   ├── cpu_capability.hpp
     │   ├── cpu_info.hpp
     │   ├── defensive_lab.hpp
@@ -325,6 +326,7 @@ MemoryLatencyAnalyzer/
     ├── src/
     │   ├── bandwidth_measurer.cpp
     │   ├── evaluation_lab.cpp
+    │   ├── operational_lab.cpp
     │   ├── cpu_capability.cpp
     │   ├── cpu_info.cpp
     │   ├── defensive_lab.cpp
@@ -338,6 +340,7 @@ MemoryLatencyAnalyzer/
     │   └── timer.cpp
     └── tests/
         ├── evaluation_test.cpp
+        ├── operational_lab_test.cpp
         └── statistics_test.cpp
 
 ---
@@ -495,6 +498,42 @@ These scenarios define expected control behavior and produce auditable evidence 
 ### Phase/platform portability
 
 Run the same evaluation command on each target CPU/OS environment and keep the resulting JSON reports. The platform fingerprint plus the measured SNR, TVLA, error rate, and repeatability metrics provide the basis for comparing architecture-dependent behavior. The project does not assume that one CPU's timing numbers transfer unchanged to another.
+
+---
+
+## Operational defensive lab
+
+برای ارزیابی end-to-end، پروژه یک state machine کاملاً مصنوعی دارد:
+
+~~~bash
+./latency_analyzer --operational-lab
+./latency_analyzer --operational-lab --operational-runs 5
+~~~
+
+در این آزمایشگاه رفتارهای زیر فقط به‌صورت event شبیه‌سازی می‌شوند:
+
+- target access
+- privilege-change attempt
+- persistence attempt
+- defense-evasion indicator
+- command-and-control pattern
+- sensitive-data collection
+- data staging
+- data transfer / exfiltration
+- cleanup/recovery
+
+خروجی شامل نرخ تشخیص، missed events، false-positive rate و recovery rate است و یک JSON قابل‌پردازش تولید می‌شود.
+
+مرز مرجع:
+
+- state و data فقط در حافظه هستند
+- هیچ socket یا network connection ساخته نمی‌شود
+- persistence واقعی ایجاد نمی‌شود
+- privilege سیستم تغییر نمی‌کند
+- subprocess یا process injection انجام نمی‌شود
+- دسترسی به process یا memory خارجی وجود ندارد
+
+این بخش برای سنجش قرارداد کنترلی و پایداری گزارش‌دهی است؛ عملکرد یک محصول واقعی EDR/DLP/firewall/SIEM را ادعا نمی‌کند.
 
 ---
 

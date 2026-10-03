@@ -75,4 +75,39 @@ if(BUILD_TESTING)
         NAME statistics_test
         COMMAND statistics_test
     )
+
+    add_executable(
+        evaluation_test
+        tests/evaluation_test.cpp
+        src/evaluation_lab.cpp
+        src/cpu_capability.cpp
+        src/cpu_info.cpp
+        src/timer.cpp
+    )
+
+    target_include_directories(
+        evaluation_test PRIVATE
+        include
+        config
+    )
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(evaluation_test PRIVATE
+            -O2
+            -Wall
+            -Wextra
+            -Wpedantic
+        )
+    endif()
+
+    target_link_libraries(
+        evaluation_test PRIVATE
+        Threads::Threads
+        rt
+    )
+
+    add_test(
+        NAME evaluation_test
+        COMMAND evaluation_test
+    )
 endif()

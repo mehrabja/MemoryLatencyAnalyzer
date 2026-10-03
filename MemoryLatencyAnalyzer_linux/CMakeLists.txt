@@ -1,11 +1,23 @@
 cmake_minimum_required(VERSION 3.15)
-project(MemoryLatencyAnalyzer)
+
+project(MemoryMicroarchitectureAnalyzer
+    VERSION 1.0.0
+    LANGUAGES CXX
+)
+
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES
+   "x86_64|AMD64|amd64|i.86")
+    message(FATAL_ERROR
+        "MemoryMicroarchitectureAnalyzer requires an x86/x86-64 CPU.")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(latency_analyzer
     src/main.cpp
+    src/timer.cpp
     src/statistics.cpp
     src/cpu_info.cpp
     src/latency_measurer.cpp
@@ -13,20 +25,51 @@ add_executable(latency_analyzer
     src/shared_memory_measurer.cpp
     src/reporter.cpp
     src/platform_utils.cpp
-    src/spectre_v1.cpp          # <---- این خط را اضافه کنید
+    src/spectre_v1.cpp
 )
 
-target_include_directories(latency_analyzer PRIVATE include config)
+target_include_directories(latency_analyzer PRIVATE
+    include
+    config
+)
 
-if(MSVC)
-    target_compile_options(latency_analyzer PRIVATE /Od)
-else()
-    target_compile_options(latency_analyzer PRIVATE -O0 -march=native)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(latency_analyzer PRIVATE
+        -O2
+        -march=native
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Wshadow
+        -Wconversion
+        -Wsign-conversion
+        -Wformat=2
+        -Wundef
+    )
 endif()
 
-# لینوکس: shm_open/pthread روی بعضی توزیع‌ها/glibcهای قدیمی‌تر به لینک
-# صریح librt و libpthread نیاز دارند؛ روی glibc جدید بی‌ضرر است.
-if(UNIX AND NOT APPLE)
-    find_package(Threads REQUIRED)
-    target_link_libraries(latency_analyzer PRIVATE Threads::Threads rt)
+find_package(Threads REQUIRED)
+target_link_libraries(
+    latency_analyzer PRIVATE
+    Threads::Threads
+    rt
+)
+
+include(CTest)
+
+if(BUILD_TESTING)
+    add_executable(
+        statistics_test
+        tests/statistics_test.cpp
+        src/statistics.cpp
+    )
+
+    target_include_directories(
+        statistics_test PRIVATE include
+    )
+
+    add_test(
+        NAME statistics_test
+        COMMAND statistics_test
+    )
 endif()

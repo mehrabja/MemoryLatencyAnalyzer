@@ -6,13 +6,16 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cerrno>
 #include <charconv>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <immintrin.h>
+#include <limits>
 #include <optional>
 #include <random>
 #include <sstream>
@@ -22,6 +25,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <utility>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -86,8 +90,8 @@ public:
                     &buffer_[next]);
         }
 
-        // First touch before timing.
-        for (std::size_t i = 0; i < count_; i += 128U) {
+        // First touch before timing, one cache line per 4 KiB page.
+        for (std::size_t i = 0; i < count_; i += 64U) {
             buffer_[i].padding[0] = static_cast<std::uint8_t>(i);
         }
     }
@@ -110,24 +114,6 @@ private:
     std::size_t size_ = 0;
     std::size_t count_ = 0;
 };
-
-std::string trim(std::string value) {
-    while (!value.empty() &&
-           std::isspace(
-               static_cast<unsigned char>(value.front()))) {
-        value.erase(value.begin());
-    }
-    while (!value.empty() &&
-           std::isspace(
-               static_cast<unsigned char>(value.back()))) {
-        value.pop_back();
-    }
-    return value;
-}
-
-std::string shell_escape_not_needed(const std::string& value) {
-    return value;
-}
 
 ProcessResult run_process(
     const std::string& program,
@@ -591,6 +577,7 @@ MlcComparisonReport MlcComparison::run(
                     Config::TSC_CALIBRATION_ROUNDS,
                     Config::TSC_CALIBRATION_MS);
             if (parsed_idle) {
+                point.delay_cycles = 0U;
                 point.mlc_ns = *parsed_idle;
                 point.absolute_delta_ns =
                     point.ours_ns - point.mlc_ns;

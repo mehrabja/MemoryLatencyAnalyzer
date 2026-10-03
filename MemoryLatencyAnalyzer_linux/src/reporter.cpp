@@ -232,14 +232,22 @@ void Reporter::print_bandwidth(
 
     for (const auto& result : results) {
         std::cout
-            << result.allocator
-            << " (" << std::fixed << std::setprecision(2)
-            << (static_cast<double>(result.size_bytes) /
-                (1024.0 * 1024.0))
-            << " MiB)\n"
-            << "  read : " << result.read_gb_s << " GiB/s\n"
-            << "  write: " << result.write_gb_s << " GiB/s\n"
-            << "  copy : " << result.copy_gb_s << " GiB/s\n\n";
+            << "  copy : " << result.copy_gb_s << " GiB/s\n";
+
+        if (result.pmu_read) {
+            std::cout << "  PMU read region:\n";
+            print_pmu(*result.pmu_read, 0U, 0.0, false);
+        }
+        if (result.pmu_write) {
+            std::cout << "  PMU write region:\n";
+            print_pmu(*result.pmu_write, 0U, 0.0, false);
+        }
+        if (result.pmu_copy) {
+            std::cout << "  PMU copy region:\n";
+            print_pmu(*result.pmu_copy, 0U, 0.0, false);
+        }
+
+        std::cout << '\n';
     }
 }
 

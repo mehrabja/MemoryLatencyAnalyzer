@@ -243,6 +243,8 @@ Other:
   --lab-runs N           Independent Spectre lab runs (default 5)
   --phase5-lab           Run the Phase 5 defensive lab and exit
   --phase5-runs N        Independent Phase 5 lab runs (default 5)
+  --cpu-capability       Detect CPU and run compute-capacity benchmark
+  --compute-seconds N    CPU benchmark duration in seconds (default 1)
   --help                 Show this help
 ~~~
 
@@ -313,7 +315,6 @@ MemoryLatencyAnalyzer/
     │   ├── platform_utils.hpp
     │   ├── reporter.hpp
     │   ├── shared_memory_measurer.hpp
-    │   ├── defensive_lab.hpp
     │   ├── spectre_v1.hpp
     │   ├── statistics.hpp
     │   └── timer.hpp
@@ -327,7 +328,6 @@ MemoryLatencyAnalyzer/
     │   ├── platform_utils.cpp
     │   ├── reporter.cpp
     │   ├── shared_memory_measurer.cpp
-    │   ├── defensive_lab.cpp
     │   ├── spectre_v1.cpp
     │   ├── statistics.cpp
     │   └── timer.cpp

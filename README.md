@@ -229,6 +229,12 @@ Latency:
 Bandwidth:
   --bandwidth-mib N      Bandwidth buffer size in MiB (default 64)
   --no-bandwidth         Skip bandwidth measurements
+  --mlc-compare          Compare this tool with Intel MLC
+  --mlc-buffer-mib N     Our latency buffer size for MLC comparison (default 256)
+  --mlc-load-mib N       Total loaded-latency worker traffic (default 256)
+  --mlc-delays LIST      Injection delays in cycles (default 0,100,800,4000)
+  --mlc-csv FILE         MLC comparison CSV (default mlc_comparison.csv)
+  --mlc-json FILE        MLC comparison JSON (default mlc_comparison.json)
 
 Shared memory:
   --shm-iterations N     Cross-process round trips (default 2000)
@@ -273,6 +279,7 @@ Requirements:
 - CMake 3.15+
 - C++17 compiler
 - pthread support
+- optional: Intel MLC installed separately and available as `mlc` in PATH for MLC comparison
 
 Build and test:
 
@@ -536,6 +543,48 @@ Run the same evaluation command on each target CPU/OS environment and keep the r
 این بخش برای سنجش قرارداد کنترلی و پایداری گزارش‌دهی است؛ عملکرد یک محصول واقعی EDR/DLP/firewall/SIEM را ادعا نمی‌کند.
 
 ---
+
+## Optional Intel MLC comparison
+
+The analyzer includes an optional comparison harness for Intel Memory Latency Checker (MLC). It never downloads MLC automatically; obtain the licensed Intel package separately and put the `mlc` executable in `PATH`.
+
+The current Intel release is MLC v3.13. The official commands used by this harness are `--idle_latency` and `--loaded_latency`. For comparison safety, the harness invokes MLC with `-e`, which disables MLC prefetcher modification rather than requiring privileged MSR writes.
+
+Run:
+
+~~~bash
+./latency_analyzer --mlc-compare
+~~~
+
+Useful controls:
+
+~~~bash
+./latency_analyzer --mlc-compare \
+  --mlc-buffer-mib 256 \
+  --mlc-load-mib 256 \
+  --mlc-delays 0,100,800,4000 \
+  --mlc-csv mlc_comparison.csv \
+  --mlc-json mlc_comparison.json
+~~~
+
+The comparison measures:
+
+1. **Idle latency** — this tool's dependent pointer chase on a cache-line-aligned randomized ring versus `mlc --idle_latency`.
+2. **Loaded latency** — this tool's dependent pointer chase while worker threads generate sustained cache-line reads; the same injection-delay values are passed to MLC with `--loaded_latency -dN`.
+
+For the local harness, an injection delay is approximated with repeated `PAUSE` instructions between dependent loads. MLC's delay machinery is implemented by MLC itself, so equal delay numbers define the comparison point but do not imply identical traffic-generation internals.
+
+CSV fields are:
+
+~~~text
+scenario,delay,metric,ours,mlc,absolute_delta,percent_delta,status
+~~~
+
+`percent_delta` is `100 * (ours - mlc) / mlc`; when MLC reports zero, the field is recorded as `NA`/null.
+
+The JSON report also records the MLC path, detected version, diagnostic text, and the prefetcher mode. Missing MLC is a normal optional case: the harness writes a report and exits successfully after reporting that MLC was not found. MLC command failures or parse failures are recorded per point.
+
+This is a side-by-side benchmark comparison, not a claim that Intel MLC is ground truth. Differences can arise from pointer-chain construction, memory placement, prefetcher policy, load-generator topology, compiler/runtime behavior, and operating-system scheduling.
 
 ## CPU capability profiler
 

@@ -2,6 +2,7 @@
 #include "cpu_info.hpp"
 #include "cpu_capability.hpp"
 #include "defensive_lab.hpp"
+#include "evaluation_lab.hpp"
 #include "latency_measurer.hpp"
 #include "platform_utils.hpp"
 #include "reporter.hpp"
@@ -47,7 +48,7 @@ void print_help() {
         << "  --phase5-lab           Run the Phase 5 defensive lab and exit\n"
         << "  --phase5-runs N        Independent Phase 5 lab runs (default 5)\n"
         << "  --cpu-capability       Detect CPU and run compute-capacity benchmark\n"
-        << "  --compute-seconds N    CPU benchmark duration in seconds (default 1)\n"
+        << "  --compute-seconds N    CPU benchmark duration in seconds (default 1)\n        << "  --evaluation-lab       Run stability, SNR, TVLA and control validation lab\n"        << "  --evaluation-runs N    Evaluation runs (default 3)\n"        << "  --trace-samples N      Timing samples per class (default 2048)\n"        << "  --trace-average N      Samples averaged per block (default 4)\n"        << "  --evaluation-report F  Write evaluation JSON report (default evaluation_lab_report.json)\n"
         << "  --help                 Show this help\n";
 }
 
@@ -105,6 +106,9 @@ int main(int argc, char* argv[]) {
     int spectre_lab_runs = 5;
     int phase5_runs = 5;
     int compute_seconds = 1;
+    int evaluation_runs = 3;
+    int trace_samples = 2048;
+    int trace_average = 4;
 
     std::size_t buffer_size = 0;
     std::size_t bandwidth_size =
@@ -116,9 +120,11 @@ int main(int argc, char* argv[]) {
     bool run_spectre_lab = false;
     bool run_phase5_lab = false;
     bool run_cpu_capability = false;
+    bool run_evaluation_lab = false;
     bool quiet = false;
     bool verbose = false;
     std::string csv_file;
+    std::string evaluation_report = "evaluation_lab_report.json";
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
@@ -189,6 +195,29 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Invalid --compute-seconds value\n";
                 return 2;
             }
+        } else if (arg == "--evaluation-lab") {
+            run_evaluation_lab = true;
+        } else if (arg == "--evaluation-runs") {
+            if (!consume_int(argc, argv, i, evaluation_runs) || evaluation_runs <= 0) {
+                std::cerr << "Invalid --evaluation-runs value\n";
+                return 2;
+            }
+        } else if (arg == "--trace-samples") {
+            if (!consume_int(argc, argv, i, trace_samples) || trace_samples <= 0) {
+                std::cerr << "Invalid --trace-samples value\n";
+                return 2;
+            }
+        } else if (arg == "--trace-average") {
+            if (!consume_int(argc, argv, i, trace_average) || trace_average <= 0) {
+                std::cerr << "Invalid --trace-average value\n";
+                return 2;
+            }
+        } else if (arg == "--evaluation-report") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing --evaluation-report filename\n";
+                return 2;
+            }
+            evaluation_report = argv[++i];
         } else if (arg == "--spectre-tries") {
             if (!consume_int(argc, argv, i, spectre_tries) || spectre_tries <= 0) {
                 std::cerr << "Invalid --spectre-tries value\n";
@@ -213,9 +242,57 @@ int main(int argc, char* argv[]) {
         spectre_tries <= 0 ||
         (run_spectre_lab && spectre_lab_runs <= 0) ||
         (run_phase5_lab && phase5_runs <= 0) ||
-        (run_cpu_capability && compute_seconds <= 0)) {
+        (run_cpu_capability && compute_seconds <= 0) ||
+        (run_evaluation_lab && (evaluation_runs <= 0 || trace_samples <= 0 || trace_average <= 0))) {
         std::cerr << "Invalid numeric configuration\n";
         return 2;
+    }
+
+    if (run_evaluation_lab) {
+        const auto evaluation =
+            EvaluationLab::run(
+                evaluation_runs,
+                trace_samples,
+                static_cast<std::size_t>(trace_average),
+                evaluation_report);
+
+        std::cout
+            << "Evaluation & Validation Lab\n"
+            << "Aligned samples: " << evaluation.aligned_samples
+            << " | alignment loss: " << evaluation.alignment_loss_percent << "%\n"
+            << "Fixed mean: " << evaluation.fixed_metrics.mean
+            << " | Random mean: " << evaluation.random_metrics.mean << '\n'
+            << "Outliers rejected: "
+            << evaluation.fixed_metrics.rejected_count
+            << " / "
+            << evaluation.random_metrics.rejected_count << '\n'
+            << "SNR: " << evaluation.snr_linear
+            << " (" << evaluation.snr_db << " dB)\n"
+            << "Classification error: "
+            << evaluation.classification_error_percent << "%\n"
+            << "TVLA |t|: " << evaluation.tvla.abs_t
+            << " (threshold "
+            << evaluation.tvla.threshold << ")"
+            << (evaluation.leakage_detected
+                    ? " LEAKAGE-SIGNAL-DETECTED"
+                    : " no-threshold-crossing")
+            << '\n'
+            << "Repeatability CV: "
+            << evaluation.repeatability_cv_percent << "% "
+            << (evaluation.repeatability_ok ? "OK" : "OUTSIDE_CRITERIA")
+            << '\n'
+            << "Platform: " << evaluation.platform.brand
+            << " | " << evaluation.platform.os_release
+            << " | " << evaluation.platform.machine << '\n'
+            << "Control contracts evaluated: "
+            << evaluation.controls.size() << " (synthetic; not live EDR/DLP testing)\n"
+            << "Report: "
+            << (evaluation.report_written
+                    ? evaluation.report_path
+                    : "FAILED")
+            << '\n';
+
+        return evaluation.report_written ? 0 : 1;
     }
 
     if (run_cpu_capability) {

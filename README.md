@@ -19,6 +19,8 @@ It works close to the hardware with RDTSCP, LFENCE, CLFLUSH, CPUID, Linux CPU af
 - Cross-process shared-memory round-trip latency
 - Cache-coherence and synchronization effects
 - Mean, median, p95, p99, standard deviation, minimum, maximum
+- Stability evaluation with sample alignment, block averaging, MAD outlier rejection, SNR, classification error, and Welch t-test/TVLA
+- Platform fingerprinting for repeatability across CPU/OS architectures
 - CSV export and historical logging
 - A self-contained educational Spectre Variant 1 demonstration
 
@@ -308,6 +310,7 @@ MemoryLatencyAnalyzer/
     ├── config/settings.hpp
     ├── include/
     │   ├── bandwidth_measurer.hpp
+    │   ├── evaluation_lab.hpp
     │   ├── cpu_capability.hpp
     │   ├── cpu_info.hpp
     │   ├── defensive_lab.hpp
@@ -320,6 +323,7 @@ MemoryLatencyAnalyzer/
     │   └── timer.hpp
     ├── src/
     │   ├── bandwidth_measurer.cpp
+    │   ├── evaluation_lab.cpp
     │   ├── cpu_capability.cpp
     │   ├── cpu_info.cpp
     │   ├── defensive_lab.cpp
@@ -331,7 +335,9 @@ MemoryLatencyAnalyzer/
     │   ├── spectre_v1.cpp
     │   ├── statistics.cpp
     │   └── timer.cpp
-    └── tests/statistics_test.cpp
+    └── tests/
+        ├── evaluation_test.cpp
+        └── statistics_test.cpp
 
 ---
 
@@ -421,6 +427,72 @@ It repeats the same in-process synthetic target and reports:
 - bytes that were correct in every run
 
 This is deliberately restricted to the program's own synthetic secret. It does not accept PIDs, executable paths, arbitrary addresses, or data from other processes.
+
+---
+
+## Evaluation & validation lab
+
+The evaluation layer is a separate local harness for making measurements more repeatable and for documenting the experimental reference boundary.
+
+Run:
+
+~~~bash
+./latency_analyzer --evaluation-lab
+./latency_analyzer --evaluation-lab --evaluation-runs 5 --trace-samples 4096 --trace-average 4
+~~~
+
+The pipeline performs:
+
+1. **Sample alignment** — paired classes are truncated to a common sample count before statistical comparison.
+2. **Block averaging** — adjacent timing observations can be averaged to reduce short-term noise.
+3. **MAD outlier rejection** — median absolute deviation is used instead of a mean/stddev rule so a few large excursions do not dominate the result.
+4. **SNR** — reports the absolute difference between class means relative to pooled timing noise.
+5. **Error rate** — evaluates a simple threshold classifier against the known fixed/random labels.
+6. **TVLA** — runs Welch's two-sample t-test and reports `|t|` against a configurable reference threshold of 4.5.
+7. **Repeatability** — computes the coefficient of variation across per-run medians.
+8. **Recovery** — the lab injects one synthetic incomplete-capture fault and exercises the local retry/recovery path.
+9. **Platform fingerprint** — records CPU brand/vendor, core topology, machine architecture, and kernel release so results from other machines can be compared later.
+
+### Default acceptance criteria
+
+The lab records these as engineering defaults, not universal hardware or security standards:
+
+- repeatability CV ≤ 10%
+- classification error ≤ 5%
+- TVLA reference threshold = 4.5
+
+A TVLA threshold crossing is reported separately as `leakage_detected`; it does not automatically mean the measurement pipeline is unstable. The built-in timing fixture is intentionally data-dependent so the TVLA path can be exercised.
+
+### Reference environment and ground truth
+
+The reference boundary is explicit:
+
+- **process boundary:** the lab is self-contained in one process
+- **data boundary:** only synthetic fixed/random inputs are used
+- **observation boundary:** local timing and local filesystem reporting only
+- **ground truth:** the class label for every synthetic trace is known when the trace is collected
+- **interfaces:** the lab exposes a small C++ API plus a JSON report containing metrics, platform metadata, and control contracts
+
+The generated JSON report is suitable as a machine-readable record for later cross-platform comparisons.
+
+### Operational control evaluation
+
+The report contains synthetic scenarios for:
+
+- EDR monitoring of suspicious execution
+- DLP handling of a sensitive-data export
+- microsegmentation blocking an unauthorized egress flow
+- least-privilege denial of protected-resource access
+- network monitoring of a simulated command-channel pattern
+- persistence monitoring
+- defense-evasion/stealth monitoring
+- source-to-sink data-flow monitoring
+
+These scenarios define expected control behavior and produce auditable evidence fields, but they do **not** connect to or claim to validate a real EDR, DLP, firewall, microsegmentation platform, IAM system, or SIEM. Live validation requires replaying equivalent authorized events through the target platform and comparing its telemetry with this ground truth.
+
+### Phase/platform portability
+
+Run the same evaluation command on each target CPU/OS environment and keep the resulting JSON reports. The platform fingerprint plus the measured SNR, TVLA, error rate, and repeatability metrics provide the basis for comparing architecture-dependent behavior. The project does not assume that one CPU's timing numbers transfer unchanged to another.
 
 ---
 

@@ -574,6 +574,26 @@ The two matrices share the same initiator-node × memory-node axes. In restricte
 
 NUMA placement is experimental infrastructure, not a guarantee that every access physically remains on the requested node; kernel policy, topology, NUMA balancing, and memory availability can affect the result.
 
+## Spectre / Meltdown reference catalog
+
+The project now includes a small reference catalog derived from the public [jarmouz/spectre_meltdown](https://github.com/jarmouz/spectre_meltdown) repository.
+
+Run:
+
+~~~bash
+./latency_analyzer --spectre-meltdown-reference
+~~~
+
+The catalog records the three vulnerability identifiers discussed by that source:
+
+- Spectre Variant 1 — CVE-2017-5753
+- Spectre Variant 2 — CVE-2017-5715
+- Meltdown — CVE-2017-5754
+
+Only Variant 1 is locally demonstrated by this project, through the existing self-contained Spectre V1 toy victim. The reference mode does not add a Meltdown exploit, does not access kernel memory, and does not accept arbitrary external process addresses.
+
+The upstream `jarmouz/spectre_meltdown` repository contains documentation and screenshots and points to separate PoCs/checkers; it does not contain a reusable C/C++ implementation to vendor into this analyzer. The integration therefore preserves the useful vulnerability taxonomy and provenance without embedding an external exploit.
+
 ## CPU capability profiler
 
 A separate CPU profiling mode detects the processor identity and measures a short single-thread compute workload.

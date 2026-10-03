@@ -11,6 +11,7 @@
 #include "settings.hpp"
 #include "shared_memory_measurer.hpp"
 #include "spectre_v1.hpp"
+#include "spectre_meltdown_reference.hpp"
 #include "timer.hpp"
 
 #include <algorithm>
@@ -47,6 +48,7 @@ void print_help() {
         << "  --quiet                Minimal output\n"
         << "  --verbose              Include p95/p99/stddev/min/max\n\n"
         << "Other:\n"
+        << "  --spectre-meltdown-reference Show Spectre/Meltdown reference catalog and exit\n"
         << "  --spectre              Run the self-contained Spectre V1 demo and exit\n"
         << "  --spectre-tries N      Attempts per leaked byte (default 999)\n"
         << "  --spectre-lab          Repeat the self-contained Spectre demo for reliability analysis\n"
@@ -293,6 +295,7 @@ int main(int argc, char* argv[]) {
     bool run_bandwidth = true;
     bool run_shared_memory = true;
     bool run_spectre = false;
+    bool run_spectre_meltdown_reference = false;
     bool run_spectre_lab = false;
     bool run_phase5_lab = false;
     bool run_cpu_capability = false;
@@ -312,7 +315,9 @@ int main(int argc, char* argv[]) {
             print_help();
             return 0;
         }
-        if (arg == "--spectre") {
+        if (arg == "--spectre-meltdown-reference") {
+            run_spectre_meltdown_reference = true;
+        } else if (arg == "--spectre") {
             run_spectre = true;
         } else if (arg == "--quiet") {
             quiet = true;
@@ -678,6 +683,11 @@ int main(int argc, char* argv[]) {
             std::cout << '\n';
         }
 
+        return 0;
+    }
+
+    if (run_spectre_meltdown_reference) {
+        SpectreMeltdownReference::print();
         return 0;
     }
 

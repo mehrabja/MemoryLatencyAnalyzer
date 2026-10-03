@@ -275,6 +275,10 @@ int main(int argc, char* argv[]) {
             << " (" << evaluation.snr_db << " dB)\n"
             << "Classification error: "
             << evaluation.classification_error_percent << "%\n"
+            << "Capture recovery: "
+            << evaluation.recovered_captures << "/"
+            << evaluation.simulated_capture_faults << " ("
+            << evaluation.recovery_rate_percent << "%)\n"
             << "TVLA |t|: " << evaluation.tvla.abs_t
             << " (threshold "
             << evaluation.tvla.threshold << ")"

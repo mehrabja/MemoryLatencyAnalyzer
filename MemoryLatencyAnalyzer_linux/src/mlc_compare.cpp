@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <cmath>
 #include <charconv>
 #include <cstdlib>
 #include <cstring>

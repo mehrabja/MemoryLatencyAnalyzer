@@ -229,6 +229,8 @@ Latency:
 Bandwidth:
   --bandwidth-mib N      Bandwidth buffer size in MiB (default 64)
   --no-bandwidth         Skip bandwidth measurements
+  --numa-node N          Allocate benchmark buffers on NUMA node N
+  --numa-matrix          Measure NUMA latency and read-bandwidth matrix
 
 Shared memory:
   --shm-iterations N     Cross-process round trips (default 2000)
@@ -273,6 +275,7 @@ Requirements:
 - CMake 3.15+
 - C++17 compiler
 - pthread support
+- optional: libnuma development headers/library for NUMA measurements
 
 Build and test:
 
@@ -341,6 +344,7 @@ MemoryLatencyAnalyzer/
     └── tests/
         ├── evaluation_test.cpp
         ├── operational_lab_test.cpp
+        ├── numa_test.cpp
         └── statistics_test.cpp
 
 ---
@@ -537,6 +541,39 @@ Run the same evaluation command on each target CPU/OS environment and keep the r
 
 ---
 
+## Optional NUMA support
+
+The Linux build can use **libnuma** when its headers and library are available at CMake configure time. NUMA support is optional; the core analyzer still builds without it.
+
+### Explicit memory-node placement
+
+Run the normal latency/bandwidth benchmark while allocating its benchmark buffers on one NUMA node:
+
+~~~bash
+./latency_analyzer --numa-node 0 --rounds 5 --iterations 1000
+~~~
+
+The benchmark thread remains pinned to the normal primary CPU. The report prints the CPU's NUMA node and the requested memory node, so local versus remote placement is explicit.
+
+When libnuma/NUMA is unavailable, the command reports that the NUMA benchmark was skipped rather than silently presenting a non-NUMA result.
+
+### NUMA latency/bandwidth matrix
+
+Run every initiator node that has at least one CPU allowed to the process against every discovered NUMA memory node:
+
+~~~bash
+./latency_analyzer --numa-matrix --rounds 3 --iterations 1000 --bandwidth-mib 64
+~~~
+
+The matrix prints:
+
+- median latency in nanoseconds for the existing forced-cache-miss dependent pointer-chasing experiment
+- median sequential read bandwidth in GiB/s using NUMA-backed buffers
+
+The two matrices share the same initiator-node × memory-node axes. In restricted containers, NUMA nodes without an allowed CPU are not used as initiator rows.
+
+NUMA placement is experimental infrastructure, not a guarantee that every access physically remains on the requested node; kernel policy, topology, NUMA balancing, and memory availability can affect the result.
+
 ## CPU capability profiler
 
 A separate CPU profiling mode detects the processor identity and measures a short single-thread compute workload.
@@ -594,7 +631,7 @@ The detector statistics are synthetic lab measurements, not a production EDR or 
 
 ## Continuous integration
 
-GitHub Actions builds the project on Ubuntu with CMake and runs the unit test suite.
+GitHub Actions builds the project on Ubuntu with CMake and runs the unit test suite. The NUMA test is conditional: it uses libnuma when available and returns CTest's skip code when NUMA support is unavailable on the runner.
 
 Hardware-specific benchmark numbers are not used as CI assertions because hosted CI runners do not provide a stable microarchitectural environment.
 

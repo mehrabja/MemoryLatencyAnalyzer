@@ -30,6 +30,7 @@ add_executable(latency_analyzer
     src/cpu_capability.cpp
     src/evaluation_lab.cpp
     src/operational_lab.cpp
+    src/mlc_compare.cpp
 )
 
 target_include_directories(latency_analyzer PRIVATE
@@ -62,6 +63,41 @@ target_link_libraries(
 include(CTest)
 
 if(BUILD_TESTING)
+    add_executable(
+        mlc_compare_test
+        tests/mlc_compare_test.cpp
+        src/mlc_compare.cpp
+        src/platform_utils.cpp
+        src/timer.cpp
+        src/statistics.cpp
+    )
+
+    target_include_directories(
+        mlc_compare_test PRIVATE
+        include
+        config
+    )
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(mlc_compare_test PRIVATE
+            -O2
+            -march=native
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wshadow
+            -Wconversion
+            -Wsign-conversion
+            -Wformat=2
+            -Wundef
+        )
+    endif()
+
+    add_test(
+        NAME mlc_compare_test
+        COMMAND mlc_compare_test
+    )
+
     add_executable(
         statistics_test
         tests/statistics_test.cpp

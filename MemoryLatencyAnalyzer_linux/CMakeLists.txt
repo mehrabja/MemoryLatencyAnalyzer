@@ -26,6 +26,7 @@ add_executable(latency_analyzer
     src/reporter.cpp
     src/platform_utils.cpp
     src/spectre_v1.cpp
+    src/defensive_lab.cpp
 )
 
 target_include_directories(latency_analyzer PRIVATE

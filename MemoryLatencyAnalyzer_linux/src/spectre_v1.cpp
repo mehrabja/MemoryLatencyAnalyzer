@@ -227,6 +227,55 @@ SpectreResult read_byte_with_threshold(
         tries);
 }
 
+std::string read_string_impl(
+    std::size_t start_offset,
+    std::size_t length,
+    int tries,
+    bool print_progress) {
+    if (tries <= 0 ||
+        start_offset < kArchitecturalArraySize ||
+        start_offset > array1.size() ||
+        length > array1.size() - start_offset) {
+        return {};
+    }
+
+    const std::uint64_t threshold =
+        calibrate_threshold();
+
+    std::string result;
+    result.reserve(length);
+
+    for (std::size_t i = 0; i < length; ++i) {
+        const SpectreResult value =
+            retry_if_uncertain(
+                start_offset + i,
+                tries,
+                threshold);
+
+        result.push_back(
+            value.success
+                ? static_cast<char>(value.guessed_value)
+                : '?');
+
+        if (print_progress) {
+            std::cout
+                << "byte[" << i << "] = 0x"
+                << std::hex
+                << static_cast<int>(value.guessed_value)
+                << std::dec
+                << " score=" << value.score
+                << " second=" << value.second_score
+                << " confidence=" << value.confidence
+                << (value.success
+                        ? " OK"
+                        : " uncertain")
+                << '\n';
+        }
+    }
+
+    return result;
+}
+
 SpectreResult retry_if_uncertain(
     std::size_t malicious_x,
     int tries,
@@ -276,46 +325,11 @@ std::string SpectreV1::read_string(
     std::size_t start_offset,
     std::size_t length,
     int tries) {
-    if (tries <= 0 ||
-        start_offset < kArchitecturalArraySize ||
-        start_offset > array1.size() ||
-        length > array1.size() - start_offset) {
-        return {};
-    }
-
-    const std::uint64_t threshold =
-        calibrate_threshold();
-
-    std::string result;
-    result.reserve(length);
-
-    for (std::size_t i = 0; i < length; ++i) {
-        const SpectreResult value =
-            retry_if_uncertain(
-                start_offset + i,
-                tries,
-                threshold);
-
-        result.push_back(
-            value.success
-                ? static_cast<char>(value.guessed_value)
-                : '?');
-
-        std::cout
-            << "byte[" << i << "] = 0x"
-            << std::hex
-            << static_cast<int>(value.guessed_value)
-            << std::dec
-            << " score=" << value.score
-            << " second=" << value.second_score
-            << " confidence=" << value.confidence
-            << (value.success
-                    ? " OK"
-                    : " uncertain")
-            << '\n';
-    }
-
-    return result;
+    return read_string_impl(
+        start_offset,
+        length,
+        tries,
+        true);
 }
 
 void SpectreV1::run_demo(int tries) {
@@ -376,3 +390,67 @@ void SpectreV1::run_demo(int tries) {
         << '\n'
         << "=====================================\n";
 }
+
+SpectreLabResult SpectreV1::run_reliability_lab(
+    int runs,
+    int tries_per_byte) {
+    SpectreLabResult result;
+    result.runs = runs;
+    result.tries_per_byte = tries_per_byte;
+    result.secret_length = sizeof(kSecret) - 1;
+    result.total_bytes =
+        result.secret_length * static_cast<std::size_t>(
+            std::max(0, runs));
+
+    if (runs <= 0 || tries_per_byte <= 0) {
+        return result;
+    }
+
+    for (int run = 0; run < runs; ++run) {
+        const std::string recovered =
+            read_string_impl(
+                kArchitecturalArraySize,
+                result.secret_length,
+                tries_per_byte,
+                false);
+
+        bool exact = recovered.size() == result.secret_length;
+        if (exact) {
+            exact = std::memcmp(
+                recovered.data(),
+                kSecret,
+                result.secret_length) == 0;
+        }
+
+        if (exact) {
+            ++result.exact_matches;
+        }
+
+        for (std::size_t i = 0;
+             i < result.secret_length;
+             ++i) {
+            if (i < recovered.size() &&
+                recovered[i] == kSecret[i]) {
+                ++result.correct_bytes;
+            }
+        }
+
+        if (result.per_byte_correct_runs.size() != result.secret_length) {
+            result.per_byte_correct_runs.assign(
+                result.secret_length,
+                0);
+        }
+
+        for (std::size_t i = 0;
+             i < result.secret_length;
+             ++i) {
+            if (i < recovered.size() &&
+                recovered[i] == kSecret[i]) {
+                ++result.per_byte_correct_runs[i];
+            }
+        }
+    }
+
+    return result;
+}
+

@@ -304,6 +304,7 @@ MemoryLatencyAnalyzer/
     ├── config/settings.hpp
     ├── include/
     │   ├── bandwidth_measurer.hpp
+    │   ├── defensive_lab.hpp
     │   ├── cpu_info.hpp
     │   ├── latency_measurer.hpp
     │   ├── platform_utils.hpp
@@ -314,6 +315,7 @@ MemoryLatencyAnalyzer/
     │   └── timer.hpp
     ├── src/
     │   ├── bandwidth_measurer.cpp
+    │   ├── defensive_lab.cpp
     │   ├── cpu_info.cpp
     │   ├── latency_measurer.cpp
     │   ├── main.cpp
@@ -414,6 +416,36 @@ It repeats the same in-process synthetic target and reports:
 - bytes that were correct in every run
 
 This is deliberately restricted to the program's own synthetic secret. It does not accept PIDs, executable paths, arbitrary addresses, or data from other processes.
+
+---
+
+## Phase 5 defensive lab
+
+The Phase 5 lab models an end-to-end attack lifecycle without implementing malware behavior:
+
+~~~bash
+./latency_analyzer --phase5-lab
+./latency_analyzer --phase5-lab --phase5-runs 5 --spectre-tries 999
+~~~
+
+It combines the local Spectre reliability fixture with simulated:
+
+- local collection
+- local metrics-only export
+- detector alerts and confirmed events
+- network egress blocking
+- persistence blocking
+
+The lab writes `phase5_defensive_report.json` in the current working directory. The report contains only experiment metrics and event dispositions; the recovered test secret is not exported.
+
+Safety boundary:
+
+- no network connections are created
+- no persistence mechanism is installed
+- no process injection is performed
+- no external process or arbitrary memory address is accessed
+
+The detector statistics are synthetic lab measurements, not a production EDR or malware detector.
 
 ---
 

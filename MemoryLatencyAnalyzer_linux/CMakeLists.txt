@@ -30,6 +30,7 @@ add_executable(latency_analyzer
     src/cpu_capability.cpp
     src/evaluation_lab.cpp
     src/operational_lab.cpp
+    src/pmu_counters.cpp
 )
 
 target_include_directories(latency_analyzer PRIVATE
@@ -62,6 +63,37 @@ target_link_libraries(
 include(CTest)
 
 if(BUILD_TESTING)
+    add_executable(
+        pmu_test
+        tests/pmu_test.cpp
+        src/pmu_counters.cpp
+    )
+
+    target_include_directories(
+        pmu_test PRIVATE
+        include
+    )
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(pmu_test PRIVATE
+            -O2
+            -Wall
+            -Wextra
+            -Wpedantic
+        )
+    endif()
+
+    add_test(
+        NAME pmu_test
+        COMMAND pmu_test
+    )
+
+    set_tests_properties(
+        pmu_test
+        PROPERTIES
+        SKIP_RETURN_CODE 77
+    )
+
     add_executable(
         statistics_test
         tests/statistics_test.cpp

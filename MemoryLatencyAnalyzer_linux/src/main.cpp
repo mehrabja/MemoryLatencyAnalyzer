@@ -40,6 +40,8 @@ void print_help() {
         << "Other:\n"
         << "  --spectre              Run the self-contained Spectre V1 demo and exit\n"
         << "  --spectre-tries N      Attempts per leaked byte (default 999)\n"
+        << "  --spectre-lab          Repeat the self-contained Spectre demo for reliability analysis\n"
+        << "  --lab-runs N           Independent Spectre lab runs (default 5)\n"
         << "  --help                 Show this help\n";
 }
 
@@ -94,6 +96,7 @@ int main(int argc, char* argv[]) {
     int warmup = Config::DEFAULT_WARMUP;
     int shm_iterations = Config::DEFAULT_SHM_ITERATIONS;
     int spectre_tries = 999;
+    int spectre_lab_runs = 5;
 
     std::size_t buffer_size = 0;
     std::size_t bandwidth_size =
@@ -102,6 +105,7 @@ int main(int argc, char* argv[]) {
     bool run_bandwidth = true;
     bool run_shared_memory = true;
     bool run_spectre = false;
+    bool run_spectre_lab = false;
     bool quiet = false;
     bool verbose = false;
     std::string csv_file;
@@ -154,6 +158,13 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Invalid --bandwidth-mib value\n";
                 return 2;
             }
+        } else if (arg == "--spectre-lab") {
+            run_spectre_lab = true;
+        } else if (arg == "--lab-runs") {
+            if (!consume_int(argc, argv, i, spectre_lab_runs) || spectre_lab_runs <= 0) {
+                std::cerr << "Invalid --lab-runs value\n";
+                return 2;
+            }
         } else if (arg == "--spectre-tries") {
             if (!consume_int(argc, argv, i, spectre_tries) || spectre_tries <= 0) {
                 std::cerr << "Invalid --spectre-tries value\n";
@@ -175,9 +186,55 @@ int main(int argc, char* argv[]) {
         iterations <= 0 ||
         warmup < 0 ||
         (run_shared_memory && shm_iterations <= 0) ||
-        spectre_tries <= 0) {
+        spectre_tries <= 0 ||
+        (run_spectre_lab && spectre_lab_runs <= 0)) {
         std::cerr << "Invalid numeric configuration\n";
         return 2;
+    }
+
+    if (run_spectre_lab) {
+        const auto lab =
+            SpectreV1::run_reliability_lab(
+                spectre_lab_runs,
+                spectre_tries);
+
+        const double byte_accuracy =
+            lab.total_bytes == 0
+                ? 0.0
+                : (100.0 * static_cast<double>(lab.correct_bytes) /
+                   static_cast<double>(lab.total_bytes));
+
+        const double exact_rate =
+            lab.runs == 0
+                ? 0.0
+                : (100.0 * static_cast<double>(lab.exact_matches) /
+                   static_cast<double>(lab.runs));
+
+        std::cout
+            << "Spectre V1 Reliability Lab\n"
+            << "Runs: " << lab.runs
+            << " | tries/byte: " << lab.tries_per_byte << '\n'
+            << "Exact recovery: "
+            << exact_rate << "%\n"
+            << "Byte accuracy: "
+            << byte_accuracy << "%\n";
+
+        if (!lab.per_byte_correct_runs.empty()) {
+            std::cout << "Stable bytes (correct in every run): ";
+            bool first = true;
+            for (std::size_t i = 0;
+                 i < lab.per_byte_correct_runs.size();
+                 ++i) {
+                if (lab.per_byte_correct_runs[i] == lab.runs) {
+                    if (!first) std::cout << ',';
+                    std::cout << i;
+                    first = false;
+                }
+            }
+            std::cout << '\n';
+        }
+
+        return 0;
     }
 
     if (run_spectre) {

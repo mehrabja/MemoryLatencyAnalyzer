@@ -601,7 +601,8 @@ int main(int argc, char* argv[]) {
                         BandwidthMeasurer::measure(
                             bandwidth_size,
                             method,
-                            Config::BANDWIDTH_REPEATS));
+                            Config::BANDWIDTH_REPEATS,
+                            pmu.get()));
                 } catch (const std::exception& ex) {
                     if (!quiet) {
                         std::cerr << "  "
@@ -616,7 +617,8 @@ int main(int argc, char* argv[]) {
                     BandwidthMeasurer::measure(
                         bandwidth_size,
                         "LargePage",
-                        Config::BANDWIDTH_REPEATS));
+                        Config::BANDWIDTH_REPEATS,
+                        pmu.get()));
             } catch (const std::exception&) {
                 if (!quiet) {
                     std::cout

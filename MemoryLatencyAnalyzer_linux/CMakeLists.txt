@@ -30,6 +30,7 @@ add_executable(latency_analyzer
     src/cpu_capability.cpp
     src/evaluation_lab.cpp
     src/operational_lab.cpp
+    src/numa_support.cpp
 )
 
 target_include_directories(latency_analyzer PRIVATE
@@ -59,9 +60,69 @@ target_link_libraries(
     rt
 )
 
+# NUMA support is optional. The main target remains buildable when libnuma
+# headers/library are not installed.
+find_path(MLA_NUMA_INCLUDE_DIR numa.h)
+find_library(MLA_NUMA_LIBRARY NAMES numa)
+
+set(MLA_NUMA_AVAILABLE OFF)
+if(MLA_NUMA_INCLUDE_DIR AND MLA_NUMA_LIBRARY)
+    set(MLA_NUMA_AVAILABLE ON)
+    target_include_directories(
+        latency_analyzer PRIVATE
+        ${MLA_NUMA_INCLUDE_DIR}
+    )
+    target_compile_definitions(
+        latency_analyzer PRIVATE
+        MLA_HAS_NUMA=1
+    )
+    target_link_libraries(
+        latency_analyzer PRIVATE
+        ${MLA_NUMA_LIBRARY}
+    )
+endif()
+
 include(CTest)
 
 if(BUILD_TESTING)
+    add_executable(
+        numa_test
+        tests/numa_test.cpp
+        src/numa_support.cpp
+    )
+
+    target_include_directories(
+        numa_test PRIVATE
+        include
+        config
+    )
+
+    if(MLA_NUMA_AVAILABLE)
+        target_include_directories(
+            numa_test PRIVATE
+            ${MLA_NUMA_INCLUDE_DIR}
+        )
+        target_compile_definitions(
+            numa_test PRIVATE
+            MLA_HAS_NUMA=1
+        )
+        target_link_libraries(
+            numa_test PRIVATE
+            ${MLA_NUMA_LIBRARY}
+        )
+    endif()
+
+    add_test(
+        NAME numa_test
+        COMMAND numa_test
+    )
+
+    set_tests_properties(
+        numa_test
+        PROPERTIES
+        SKIP_RETURN_CODE 77
+    )
+
     add_executable(
         statistics_test
         tests/statistics_test.cpp

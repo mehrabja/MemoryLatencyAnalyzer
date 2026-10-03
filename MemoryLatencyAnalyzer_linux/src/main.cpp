@@ -5,6 +5,7 @@
 #include "evaluation_lab.hpp"
 #include "operational_lab.hpp"
 #include "latency_measurer.hpp"
+#include "numa_support.hpp"
 #include "platform_utils.hpp"
 #include "reporter.hpp"
 #include "settings.hpp"
@@ -15,7 +16,11 @@
 #include <algorithm>
 #include <charconv>
 #include <cstddef>
+#include <cmath>
+#include <iomanip>
 #include <iostream>
+#include <limits>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -106,6 +111,165 @@ bool consume_size_mib(
 
 } // namespace
 
+namespace {
+
+int first_allowed_cpu_for_node(
+    int node_id,
+    const std::vector<int>& allowed_cpus) {
+    for (const int cpu : allowed_cpus) {
+        if (NumaSupport::node_for_cpu(cpu) == node_id) {
+            return cpu;
+        }
+    }
+    return -1;
+}
+
+int run_numa_matrix(
+    std::size_t requested_buffer_size,
+    std::size_t bandwidth_size,
+    std::size_t line_size,
+    int iterations,
+    int warmup,
+    int rounds) {
+    const auto nodes = NumaSupport::nodes();
+    const auto allowed_cpus = PlatformUtils::allowed_cpus();
+
+    if (nodes.empty() || allowed_cpus.empty()) {
+        std::cerr << "NUMA matrix unavailable: no NUMA nodes or allowed CPUs found\n";
+        return 0;
+    }
+
+    struct Initiator {
+        int node = -1;
+        int cpu = -1;
+    };
+
+    std::vector<Initiator> initiators;
+    for (const auto& node : nodes) {
+        const int cpu =
+            first_allowed_cpu_for_node(node.id, allowed_cpus);
+        if (cpu >= 0) {
+            initiators.push_back({node.id, cpu});
+        }
+    }
+
+    if (initiators.empty()) {
+        std::cerr
+            << "NUMA matrix unavailable: no allowed CPU is mapped to a NUMA node\n";
+        return 0;
+    }
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const std::vector<std::vector<double>> latency_ns(
+        initiators.size(),
+        std::vector<double>(matrix_size, nan));
+    std::vector<std::vector<double>> bandwidth_gibs(
+        initiators.size(),
+        std::vector<double>(matrix_size, nan));
+
+    std::cout
+        << "===== NUMA matrix =====\n"
+        << "Latency uses forced-cache-miss dependent pointer chasing; "
+           "bandwidth is NUMA-backed sequential read throughput.\n";
+
+    for (std::size_t i = 0; i < initiators.size(); ++i) {
+        const auto& initiator = initiators[i];
+        if (!PlatformUtils::pin_current_thread(initiator.cpu)) {
+            std::cerr
+                << "[warning] could not pin to CPU "
+                << initiator.cpu << " for initiator node "
+                << initiator.node << '\n';
+        }
+
+        for (std::size_t j = 0; j < nodes.size(); ++j) {
+            const int memory_node = nodes[j].id;
+            try {
+                LatencyMeasurer latency(
+                    requested_buffer_size,
+                    line_size,
+                    memory_node);
+                const auto result =
+                    latency.measure_forced_miss(
+                        std::max(1, iterations / 2),
+                        warmup / 2,
+                        std::max(1, rounds));
+                latency_ns[i][j] =
+                    result.stats.median *
+                    1e9 /
+                    Timer::calibrate_tsc_hz(
+                        Config::TSC_CALIBRATION_ROUNDS,
+                        Config::TSC_CALIBRATION_MS);
+
+                const auto bandwidth =
+                    BandwidthMeasurer::measure(
+                        bandwidth_size,
+                        "numa",
+                        Config::BANDWIDTH_REPEATS,
+                        memory_node);
+                bandwidth_gibs[i][j] =
+                    bandwidth.read_gb_s;
+            } catch (const std::exception& ex) {
+                std::cerr
+                    << "[warning] initiator node "
+                    << initiator.node
+                    << " memory node "
+                    << memory_node
+                    << ": " << ex.what() << '\n';
+            }
+        }
+    }
+
+    std::cout << "\nLatency matrix (median ns)\n";
+    std::cout << std::setw(8) << "CPU\MEM";
+    for (const auto& node : nodes) {
+        std::cout << std::setw(12) << ("N" + std::to_string(node.id));
+    }
+    std::cout << '\n';
+
+    for (std::size_t i = 0; i < initiators.size(); ++i) {
+        std::cout << std::setw(8)
+                  << ("N" + std::to_string(initiators[i].node));
+        for (std::size_t j = 0; j < nodes.size(); ++j) {
+            const double value = latency_ns[i][j];
+            if (std::isnan(value)) {
+                std::cout << std::setw(12) << "N/A";
+            } else {
+                std::cout << std::setw(12)
+                          << std::fixed << std::setprecision(2)
+                          << value;
+            }
+        }
+        std::cout << '\n';
+    }
+
+    std::cout << "\nRead bandwidth matrix (median GiB/s)\n";
+    std::cout << std::setw(8) << "CPU\MEM";
+    for (const auto& node : nodes) {
+        std::cout << std::setw(12) << ("N" + std::to_string(node.id));
+    }
+    std::cout << '\n';
+
+    for (std::size_t i = 0; i < initiators.size(); ++i) {
+        std::cout << std::setw(8)
+                  << ("N" + std::to_string(initiators[i].node));
+        for (std::size_t j = 0; j < nodes.size(); ++j) {
+            const double value = bandwidth_gibs[i][j];
+            if (std::isnan(value)) {
+                std::cout << std::setw(12) << "N/A";
+            } else {
+                std::cout << std::setw(12)
+                          << std::fixed << std::setprecision(2)
+                          << value;
+            }
+        }
+        std::cout << '\n';
+    }
+
+    return 0;
+}
+
+} // namespace
+
 int main(int argc, char* argv[]) {
     int rounds = Config::DEFAULT_ROUNDS;
     int iterations = Config::DEFAULT_ITERATIONS;
@@ -119,6 +283,7 @@ int main(int argc, char* argv[]) {
     int trace_samples = 2048;
     int trace_average = 4;
     int operational_runs = 3;
+    int numa_node = -1;
 
     std::size_t buffer_size = 0;
     std::size_t bandwidth_size =
@@ -134,6 +299,7 @@ int main(int argc, char* argv[]) {
     bool run_operational_lab = false;
     bool quiet = false;
     bool verbose = false;
+    bool run_numa_matrix_mode = false;
     std::string csv_file;
     std::string evaluation_report = "evaluation_lab_report.json";
     std::string operational_report = "operational_lab_report.json";
@@ -175,6 +341,13 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Invalid --shm-iterations value\n";
                 return 2;
             }
+        } else if (arg == "--numa-node") {
+            if (!consume_int(argc, argv, i, numa_node) || numa_node < 0) {
+                std::cerr << "Invalid --numa-node value\n";
+                return 2;
+            }
+        } else if (arg == "--numa-matrix") {
+            run_numa_matrix_mode = true;
         } else if (arg == "--buffer-mib") {
             if (!consume_size_mib(argc, argv, i, buffer_size)) {
                 std::cerr << "Invalid --buffer-mib value\n";
@@ -260,6 +433,12 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    if (numa_node >= 0 && run_numa_matrix_mode) {
+        std::cerr
+            << "--numa-node and --numa-matrix are mutually exclusive\n";
+        return 2;
+    }
+
     if (rounds <= 0 ||
         iterations <= 0 ||
         warmup < 0 ||
@@ -272,6 +451,28 @@ int main(int argc, char* argv[]) {
         (run_operational_lab && operational_runs <= 0)) {
         std::cerr << "Invalid numeric configuration\n";
         return 2;
+    }
+
+    if (run_numa_matrix_mode) {
+        if (!NumaSupport::available()) {
+            std::cout
+                << "NUMA support unavailable; matrix benchmark skipped.\n";
+            return 0;
+        }
+
+        return run_numa_matrix(
+            buffer_size,
+            bandwidth_size,
+            Config::CACHE_LINE_SIZE,
+            iterations,
+            warmup,
+            rounds);
+    }
+
+    if (numa_node >= 0 && !NumaSupport::available()) {
+        std::cout
+            << "NUMA support unavailable; --numa-node benchmark skipped.\n";
+        return 0;
     }
 
     if (run_operational_lab) {
@@ -515,6 +716,14 @@ int main(int argc, char* argv[]) {
             Timer::measure_overhead_cycles(2000);
 
         if (!quiet) {
+            if (numa_node >= 0) {
+                std::cout
+                    << "NUMA placement: CPU " << primary_cpu
+                    << " -> node "
+                    << NumaSupport::node_for_cpu(primary_cpu)
+                    << ", memory -> node "
+                    << numa_node << '\n';
+            }
             std::cout
                 << "Memory Microarchitecture & Performance Analyzer\n\n";
 
@@ -527,7 +736,10 @@ int main(int argc, char* argv[]) {
                 allowed_cpus);
         }
 
-        LatencyMeasurer latency(buffer_size, line_size);
+        LatencyMeasurer latency(
+            buffer_size,
+            line_size,
+            numa_node);
         std::vector<MeasurementResult> latency_results;
 
         if (!quiet) {
@@ -575,37 +787,54 @@ int main(int argc, char* argv[]) {
                     << "[2/4] Measuring bandwidth...\n";
             }
 
-            const std::vector<std::string> methods{
-                "mmap", "malloc"
-            };
-
-            for (const auto& method : methods) {
+            if (numa_node >= 0) {
                 try {
                     bandwidth_results.push_back(
                         BandwidthMeasurer::measure(
                             bandwidth_size,
-                            method,
-                            Config::BANDWIDTH_REPEATS));
+                            "numa",
+                            Config::BANDWIDTH_REPEATS,
+                            numa_node));
                 } catch (const std::exception& ex) {
                     if (!quiet) {
-                        std::cerr << "  "
-                                  << method << ": "
-                                  << ex.what() << '\n';
+                        std::cerr
+                            << "  NUMA bandwidth: "
+                            << ex.what() << '\n';
                     }
                 }
-            }
+            } else {
+                const std::vector<std::string> methods{
+                    "mmap", "malloc"
+                };
 
-            try {
-                bandwidth_results.push_back(
-                    BandwidthMeasurer::measure(
-                        bandwidth_size,
-                        "LargePage",
-                        Config::BANDWIDTH_REPEATS));
-            } catch (const std::exception&) {
-                if (!quiet) {
-                    std::cout
-                        << "  LargePage: unavailable; "
-                           "requires pre-reserved 2 MiB Huge Pages.\n";
+                for (const auto& method : methods) {
+                    try {
+                        bandwidth_results.push_back(
+                            BandwidthMeasurer::measure(
+                                bandwidth_size,
+                                method,
+                                Config::BANDWIDTH_REPEATS));
+                    } catch (const std::exception& ex) {
+                        if (!quiet) {
+                            std::cerr << "  "
+                                      << method << ": "
+                                      << ex.what() << '\n';
+                        }
+                    }
+                }
+
+                try {
+                    bandwidth_results.push_back(
+                        BandwidthMeasurer::measure(
+                            bandwidth_size,
+                            "LargePage",
+                            Config::BANDWIDTH_REPEATS));
+                } catch (const std::exception&) {
+                    if (!quiet) {
+                        std::cout
+                            << "  LargePage: unavailable; "
+                               "requires pre-reserved 2 MiB Huge Pages.\n";
+                    }
                 }
             }
         }

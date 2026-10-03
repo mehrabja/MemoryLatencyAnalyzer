@@ -2,6 +2,7 @@
 
 #include "settings.hpp"
 #include "timer.hpp"
+#include "numa_support.hpp"
 
 #include <algorithm>
 #include <random>
@@ -11,9 +12,11 @@
 #include <sys/mman.h>
 
 LatencyMeasurer::LatencyMeasurer(std::size_t requested_buffer_size,
-                                 std::size_t cache_line_size)
+                                 std::size_t cache_line_size,
+                                 int numa_node)
     : cache_line_size_(cache_line_size == 0 ? Config::CACHE_LINE_SIZE
-                                            : cache_line_size) {
+                                            : cache_line_size),
+      numa_node_(numa_node) {
     const std::size_t line = 64;
     if (cache_line_size_ != line) {
         cache_line_size_ = line;
@@ -27,11 +30,27 @@ LatencyMeasurer::LatencyMeasurer(std::size_t requested_buffer_size,
     buffer_size_ = (buffer_size_ / line) * line;
     if (buffer_size_ < minimum) buffer_size_ = minimum;
 
-    void* memory = mmap(nullptr, buffer_size_,
-                        PROT_READ | PROT_WRITE,
-                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (memory == MAP_FAILED) {
-        throw std::runtime_error("mmap failed while allocating latency buffer");
+    void* memory = nullptr;
+
+    if (numa_node_ >= 0) {
+        if (!NumaSupport::available()) {
+            throw std::runtime_error(
+                "NUMA allocation requested but libnuma/NUMA is unavailable");
+        }
+        memory = NumaSupport::allocate_on_node(buffer_size_, numa_node_);
+        if (!memory) {
+            throw std::runtime_error(
+                "NUMA allocation failed for memory node " +
+                std::to_string(numa_node_));
+        }
+    } else {
+        memory = mmap(nullptr, buffer_size_,
+                      PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (memory == MAP_FAILED) {
+            throw std::runtime_error(
+                "mmap failed while allocating latency buffer");
+        }
     }
 
     buffer_ = static_cast<Node*>(memory);
@@ -50,7 +69,11 @@ LatencyMeasurer::LatencyMeasurer(std::size_t requested_buffer_size,
 }
 
 LatencyMeasurer::~LatencyMeasurer() {
-    if (buffer_) {
+    if (!buffer_) return;
+
+    if (numa_node_ >= 0) {
+        NumaSupport::free_on_node(buffer_, buffer_size_);
+    } else {
         munmap(buffer_, buffer_size_);
     }
 }

@@ -16,7 +16,8 @@ struct MeasurementResult {
 class LatencyMeasurer {
 public:
     explicit LatencyMeasurer(std::size_t requested_buffer_size = 0,
-                             std::size_t cache_line_size = 64);
+                             std::size_t cache_line_size = 64,
+                             int numa_node = -1);
     ~LatencyMeasurer();
 
     MeasurementResult measure_hit(int iterations, int warmup, int rounds);
@@ -46,6 +47,7 @@ private:
     mutable std::uint8_t sink_ = 0;
     std::uint64_t timer_overhead_cycles_ = 0;
     std::vector<std::size_t> random_order_;
+    int numa_node_ = -1;
 
     static constexpr std::size_t kLatencyBatch = 128;
     static constexpr std::size_t kStoreBatch = 256;

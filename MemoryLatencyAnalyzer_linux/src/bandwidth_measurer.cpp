@@ -2,6 +2,7 @@
 
 #include "settings.hpp"
 #include "timer.hpp"
+#include "numa_support.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -24,10 +25,24 @@ struct Allocation {
     std::string method;
 };
 
-Allocation allocate_buffer(std::size_t requested, const std::string& method) {
+Allocation allocate_buffer(
+    std::size_t requested,
+    const std::string& method,
+    int numa_node) {
     Allocation result;
     result.method = method;
     result.size = requested;
+
+    if (numa_node >= 0) {
+        if (!NumaSupport::available()) {
+            return result;
+        }
+
+        result.method = "numa-node-" + std::to_string(numa_node);
+        result.ptr = static_cast<char*>(
+            NumaSupport::allocate_on_node(requested, numa_node));
+        return result;
+    }
 
     if (method == "malloc") {
         result.ptr = static_cast<char*>(std::malloc(requested));
@@ -67,7 +82,20 @@ Allocation allocate_buffer(std::size_t requested, const std::string& method) {
 void release_buffer(Allocation& allocation) {
     if (!allocation.ptr) return;
 
-    if (allocation.method == "malloc") {
+    if (allocation.method.rfind("numa-node-", 0) == 0) {
+        const std::size_t prefix_length =
+            std::string("numa-node-").size();
+        int node = -1;
+        try {
+            node = std::stoi(allocation.method.substr(prefix_length));
+        } catch (...) {
+            node = -1;
+        }
+        if (node >= 0) {
+            NumaSupport::free_on_node(
+                allocation.ptr, allocation.size);
+        }
+    } else if (allocation.method == "malloc") {
         std::free(allocation.ptr);
     } else {
         munmap(allocation.ptr, allocation.size);
@@ -99,14 +127,17 @@ double gib_per_second(std::size_t bytes, std::uint64_t elapsed_ns) {
 BandwidthResult BandwidthMeasurer::measure(
     std::size_t size_bytes,
     const std::string& method,
-    int repeats) {
+    int repeats,
+    int numa_node) {
     if (size_bytes == 0 || repeats <= 0) {
         throw std::invalid_argument(
             "Bandwidth size and repeats must be positive");
     }
 
-    Allocation src = allocate_buffer(size_bytes, method);
-    Allocation dst = allocate_buffer(size_bytes, method);
+    Allocation src = allocate_buffer(
+        size_bytes, method, numa_node);
+    Allocation dst = allocate_buffer(
+        size_bytes, method, numa_node);
 
     if (!src.ptr || !dst.ptr) {
         release_buffer(src);
@@ -157,7 +188,9 @@ BandwidthResult BandwidthMeasurer::measure(
     (void)checksum;
 
     BandwidthResult result{
-        method,
+        numa_node >= 0
+            ? "numa-node-" + std::to_string(numa_node)
+            : method,
         size_bytes,
         median(std::move(read_rates)),
         median(std::move(write_rates)),

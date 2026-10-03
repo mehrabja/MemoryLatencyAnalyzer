@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -41,7 +42,13 @@ void print_help() {
         << "Output:\n"
         << "  --csv FILE             Write latency, bandwidth and shared-memory results\n"
         << "  --quiet                Minimal output\n"
-        << "  --verbose              Include p95/p99/stddev/min/max\n\n"
+        << "  --verbose              Include p95/p99/stddev/min/max\n"
+        << "  --mlc-compare          Compare this tool with Intel MLC\n"
+        << "  --mlc-buffer-mib N     Our latency buffer size for MLC comparison (default 256)\n"
+        << "  --mlc-load-mib N       Total loaded-latency worker traffic (default 256)\n"
+        << "  --mlc-delays LIST      Injection delays in cycles (default 0,100,800,4000)\n"
+        << "  --mlc-csv FILE         MLC comparison CSV (default mlc_comparison.csv)\n"
+        << "  --mlc-json FILE        MLC comparison JSON (default mlc_comparison.json)\n\n"
         << "Other:\n"
         << "  --spectre              Run the self-contained Spectre V1 demo and exit\n"
         << "  --spectre-tries N      Attempts per leaked byte (default 999)\n"

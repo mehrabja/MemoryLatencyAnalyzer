@@ -158,7 +158,7 @@ The measured quantity is a cross-process round trip. It therefore includes synch
 
 ## Spectre Variant 1 demonstration
 
-The optional Spectre mode is a local, self-contained educational demonstration.
+The optional Spectre mode is a local, self-contained educational demonstration. The current implementation is a more robust Phase-2-style research PoC: it calibrates the cache threshold, keeps the bounds value dynamic, uses repeated evidence per byte, reports confidence, and retries uncertain bytes. It remains intentionally confined to its own in-process demo data.
 
 It contains:
 
@@ -237,6 +237,7 @@ Output:
 
 Other:
   --spectre              Run the self-contained Spectre V1 demo and exit
+  --spectre-tries N      Attempts per leaked byte (default 999)
   --help                 Show this help
 ~~~
 
@@ -343,7 +344,7 @@ The implementation was tightened in the areas that matter most for a microbenchm
 - The build uses -O2 with strict warnings.
 - CTest coverage was added for statistics.
 - GitHub Actions now builds and tests the project on Ubuntu.
-- The Spectre demo was made self-contained and its timing threshold is calibrated instead of hard-coded.
+- The Spectre demo was made self-contained; its timing threshold is calibrated; the bounds check is dynamic; byte extraction reports confidence and retries uncertain observations.
 
 ---
 

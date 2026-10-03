@@ -2,15 +2,18 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "pmu_counters.hpp"
 #include "statistics.hpp"
 
 struct MeasurementResult {
     std::string label;
     Statistics::Summary stats;
     std::size_t timer_overhead_cycles = 0;
+    std::optional<PmuSnapshot> pmu;
 };
 
 class LatencyMeasurer {
@@ -19,15 +22,28 @@ public:
                              std::size_t cache_line_size = 64);
     ~LatencyMeasurer();
 
-    MeasurementResult measure_hit(int iterations, int warmup, int rounds);
-    MeasurementResult measure_forced_miss(int iterations, int warmup, int rounds);
-    MeasurementResult measure_store(int iterations, int warmup, int rounds);
+    MeasurementResult measure_hit(
+        int iterations,
+        int warmup,
+        int rounds,
+        PmuCounters* pmu = nullptr);
+    MeasurementResult measure_forced_miss(
+        int iterations,
+        int warmup,
+        int rounds,
+        PmuCounters* pmu = nullptr);
+    MeasurementResult measure_store(
+        int iterations,
+        int warmup,
+        int rounds,
+        PmuCounters* pmu = nullptr);
 
     std::vector<MeasurementResult> measure_strides(
         const std::vector<std::size_t>& strides,
         int iterations,
         int warmup,
-        int rounds);
+        int rounds,
+        PmuCounters* pmu = nullptr);
 
     std::size_t buffer_size() const noexcept { return buffer_size_; }
 

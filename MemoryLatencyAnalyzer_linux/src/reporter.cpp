@@ -225,7 +225,8 @@ void Reporter::print_latency(
 }
 
 void Reporter::print_bandwidth(
-    const std::vector<BandwidthResult>& results) {
+    const std::vector<BandwidthResult>& results,
+    bool verbose) {
     if (results.empty()) return;
 
     std::cout << "===== Bandwidth =====\n";
@@ -241,18 +242,21 @@ void Reporter::print_bandwidth(
             << "  write: " << result.write_gb_s << " GiB/s\n"
             << "  copy : " << result.copy_gb_s << " GiB/s\n";
 
-        if (result.pmu_read) {
-            std::cout << "  PMU read region:\n";
-            print_pmu(*result.pmu_read, 0U, 0.0, false);
-        }
-        if (result.pmu_write) {
-            std::cout << "  PMU write region:\n";
-            print_pmu(*result.pmu_write, 0U, 0.0, false);
-        }
-        if (result.pmu_copy) {
-            std::cout << "  PMU copy region:\n";
-            print_pmu(*result.pmu_copy, 0U, 0.0, false);
-        }
+        if (verbose) {
+            if (result.pmu_read) {
+                std::cout << "  PMU read region:\n";
+                print_pmu(*result.pmu_read, 0U, 0.0, false);
+            }
+            if (result.pmu_write) {
+                std::cout << "  PMU write region:\n";
+                print_pmu(*result.pmu_write, 0U, 0.0, false);
+            }
+            if (result.pmu_copy) {
+                std::cout << "  PMU copy region:\n";
+                print_pmu(*result.pmu_copy, 0U, 0.0, false);
+            }
+    
+            }
 
         std::cout << '\n';
     }

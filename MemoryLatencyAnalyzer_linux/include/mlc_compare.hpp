@@ -21,6 +21,11 @@ struct MlcComparisonReport {
     std::string binary;
     std::string version = "unknown";
     std::string diagnostic;
+    int primary_cpu = -1;
+    std::size_t latency_buffer_bytes = 0;
+    std::size_t total_load_bytes = 0;
+    std::size_t load_worker_count = 0;
+    std::string numa_policy;
     std::vector<MlcComparisonPoint> results;
     bool report_written = false;
     std::string csv_path;

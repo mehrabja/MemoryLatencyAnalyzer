@@ -24,7 +24,8 @@ public:
         bool verbose);
 
     static void print_bandwidth(
-        const std::vector<BandwidthResult>& results);
+        const std::vector<BandwidthResult>& results,
+        bool verbose = false);
 
     static void print_shared_memory(
         const SharedMemoryResult& result,

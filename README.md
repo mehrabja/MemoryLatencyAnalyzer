@@ -229,6 +229,7 @@ Latency:
 Bandwidth:
   --bandwidth-mib N      Bandwidth buffer size in MiB (default 64)
   --no-bandwidth         Skip bandwidth measurements
+  --pmu                  Enable Linux perf_event_open PMU counters
 
 Shared memory:
   --shm-iterations N     Cross-process round trips (default 2000)
@@ -341,6 +342,7 @@ MemoryLatencyAnalyzer/
     └── tests/
         ├── evaluation_test.cpp
         ├── operational_lab_test.cpp
+        ├── pmu_test.cpp
         └── statistics_test.cpp
 
 ---
@@ -536,6 +538,31 @@ Run the same evaluation command on each target CPU/OS environment and keep the r
 این بخش برای سنجش قرارداد کنترلی و پایداری گزارش‌دهی است؛ عملکرد یک محصول واقعی EDR/DLP/firewall/SIEM را ادعا نمی‌کند.
 
 ---
+
+## Optional Linux PMU counters
+
+The analyzer can collect real hardware performance-monitoring counters through Linux `perf_event_open(2)`. Enable them explicitly:
+
+~~~bash
+./latency_analyzer --pmu --verbose --rounds 5 --iterations 1000
+~~~
+
+For latency tests, the PMU group is reset and enabled after setup and warmup, remains active over the sample-collection region, then is stopped before the result is reported. Each latency result has its own snapshot. Bandwidth read, write, and copy regions are measured with separate PMU snapshots.
+
+The group requests these generic Linux events when the running kernel/CPU exposes them:
+
+- CPU cycles
+- retired instructions
+- L1D read misses
+- LLC read accesses
+- LLC read misses
+- backend stalled cycles
+
+Generic cache-event mappings are implementation dependent. Unsupported events are omitted while the working PMU events remain active.
+
+Verbose output reports raw counts, scaled counts when the group was multiplexed, and derived metrics such as misses per thousand instructions, LLC miss rate, cycles per instruction, and backend-stall fraction. For latency results it also compares PMU CPU-cycle counts with the accumulated TSC timing reference.
+
+PMU access is controlled by the host's Linux perf security policy. A restricted `kernel.perf_event_paranoid` setting, container policy, missing permissions, or unsupported events can prevent access. In those cases the analyzer prints a diagnostic and continues without PMU measurements; the ordinary latency/bandwidth benchmark is not disabled.
 
 ## CPU capability profiler
 

@@ -221,6 +221,8 @@ bool write_report(
         << result.simulated_capture_faults << ",\n";
     out << "  \"recovered_captures\": "
         << result.recovered_captures << ",\n";
+    out << "  \"recovery_rate_percent\": "
+        << result.recovery_rate_percent << ",\n";
     out << "  \"aligned_samples\": "
         << result.aligned_samples << ",\n";
     out << "  \"alignment_loss_percent\": "
@@ -684,6 +686,11 @@ EvaluationLabResult EvaluationLab::run(
 
     result.repeatability_cv_percent =
         repeatability_cv(run_medians);
+    result.recovery_rate_percent =
+        result.simulated_capture_faults == 0
+            ? 100.0
+            : 100.0 * static_cast<double>(result.recovered_captures) /
+                  static_cast<double>(result.simulated_capture_faults);
 
     result.repeatability_ok =
         result.repeatability_cv_percent <= 10.0 &&

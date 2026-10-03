@@ -176,6 +176,7 @@ Run it with:
 
 ~~~bash
 ./latency_analyzer --spectre
+./latency_analyzer --evaluation-lab --evaluation-runs 5 --trace-samples 4096 --trace-average 4
 ./latency_analyzer --spectre-lab --lab-runs 5 --spectre-tries 999
 ~~~
 
@@ -432,7 +433,7 @@ This is deliberately restricted to the program's own synthetic secret. It does n
 
 ## Evaluation & validation lab
 
-The evaluation layer is a separate local harness for making measurements more repeatable and for documenting the experimental reference boundary.
+The evaluation layer is a separate local harness for making measurements more repeatable and for documenting the experimental reference boundary. It is the implementation point for alignment, denoising, outlier control, SNR/error metrics, TVLA, recovery checks, platform fingerprints, and synthetic control evaluation.
 
 Run:
 
@@ -448,7 +449,7 @@ The pipeline performs:
 3. **MAD outlier rejection** — median absolute deviation is used instead of a mean/stddev rule so a few large excursions do not dominate the result.
 4. **SNR** — reports the absolute difference between class means relative to pooled timing noise.
 5. **Error rate** — evaluates a simple threshold classifier against the known fixed/random labels.
-6. **TVLA** — runs Welch's two-sample t-test and reports `|t|` against a configurable reference threshold of 4.5.
+6. **TVLA** — runs Welch's two-sample t-test and reports `|t|` against the API's reference threshold of 4.5.
 7. **Repeatability** — computes the coefficient of variation across per-run medians.
 8. **Recovery** — the lab injects one synthetic incomplete-capture fault and exercises the local retry/recovery path.
 9. **Platform fingerprint** — records CPU brand/vendor, core topology, machine architecture, and kernel release so results from other machines can be compared later.

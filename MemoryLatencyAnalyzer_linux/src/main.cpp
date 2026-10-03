@@ -658,7 +658,8 @@ int main(int argc, char* argv[]) {
             Reporter::print_latency(
                 latency_results, tsc_hz, verbose);
             Reporter::print_bandwidth(
-                bandwidth_results);
+                bandwidth_results,
+                verbose);
 
             if (run_shared_memory) {
                 Reporter::print_shared_memory(

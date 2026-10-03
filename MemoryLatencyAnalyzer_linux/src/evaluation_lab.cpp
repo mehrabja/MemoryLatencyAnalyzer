@@ -235,6 +235,8 @@ bool write_report(
         << (tvla_clean.threshold_exceeded ? "true" : "false") << ",\n";
     out << "  \"repeatability_ok\": "
         << (result.repeatability_ok ? "true" : "false") << ",\n";
+    out << "  \"leakage_detected\": "
+        << (result.leakage_detected ? "true" : "false") << ",\n";
     out << "  \"acceptance_criteria\": {\n";
     out << "    \"repeatability_cv_percent_max\": 10.0,\n";
     out << "    \"classification_error_percent_max\": 5.0,\n";
@@ -642,8 +644,9 @@ EvaluationLabResult EvaluationLab::run(
 
     result.repeatability_ok =
         result.repeatability_cv_percent <= 10.0 &&
-        result.classification_error_percent <= 5.0 &&
-        !result.tvla.threshold_exceeded;
+        result.classification_error_percent <= 5.0;
+    result.leakage_detected = result.tvla.threshold_exceeded ||
+                              tvla_clean.threshold_exceeded;
 
     (void)tvla_clean;
 

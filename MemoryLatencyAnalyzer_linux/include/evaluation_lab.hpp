@@ -109,6 +109,7 @@ struct EvaluationLabResult {
     TvlaResult tvla;
     TvlaResult tvla_clean;
     std::vector<TvlaResult> round_tvla;
+    std::vector<double> run_medians;
     MultipleTestingMethod multiple_testing_method =
         MultipleTestingMethod::BenjaminiHochberg;
     OutlierMethod primary_outlier_method = OutlierMethod::MAD;

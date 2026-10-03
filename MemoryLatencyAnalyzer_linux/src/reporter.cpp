@@ -255,8 +255,7 @@ void Reporter::print_bandwidth(
                 std::cout << "  PMU copy region:\n";
                 print_pmu(*result.pmu_copy, 0U, 0.0, false);
             }
-    
-            }
+        }
 
         std::cout << '\n';
     }

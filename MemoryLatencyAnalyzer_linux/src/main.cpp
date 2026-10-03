@@ -92,6 +92,7 @@ int main(int argc, char* argv[]) {
     int iterations = Config::DEFAULT_ITERATIONS;
     int warmup = Config::DEFAULT_WARMUP;
     int shm_iterations = Config::DEFAULT_SHM_ITERATIONS;
+    int spectre_tries = 999;
 
     std::size_t buffer_size = 0;
     std::size_t bandwidth_size =
@@ -152,6 +153,11 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Invalid --bandwidth-mib value\n";
                 return 2;
             }
+        } else if (arg == "--spectre-tries") {
+            if (!consume_int(argc, argv, i, spectre_tries) || spectre_tries <= 0) {
+                std::cerr << "Invalid --spectre-tries value\\n";
+                return 2;
+            }
         } else if (arg == "--csv") {
             if (i + 1 >= argc) {
                 std::cerr << "Missing --csv filename\n";
@@ -167,13 +173,14 @@ int main(int argc, char* argv[]) {
     if (rounds <= 0 ||
         iterations <= 0 ||
         warmup < 0 ||
-        (run_shared_memory && shm_iterations <= 0)) {
+        (run_shared_memory && shm_iterations <= 0) ||
+        spectre_tries <= 0) {
         std::cerr << "Invalid numeric configuration\n";
         return 2;
     }
 
     if (run_spectre) {
-        SpectreV1::run_demo();
+        SpectreV1::run_demo(spectre_tries);
         return 0;
     }
 

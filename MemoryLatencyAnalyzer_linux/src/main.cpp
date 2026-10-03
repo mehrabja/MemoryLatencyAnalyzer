@@ -1,5 +1,6 @@
 #include "bandwidth_measurer.hpp"
 #include "cpu_info.hpp"
+#include "cpu_capability.hpp"
 #include "defensive_lab.hpp"
 #include "latency_measurer.hpp"
 #include "platform_utils.hpp"
@@ -45,6 +46,8 @@ void print_help() {
         << "  --lab-runs N           Independent Spectre lab runs (default 5)\n"
         << "  --phase5-lab           Run the Phase 5 defensive lab and exit\n"
         << "  --phase5-runs N        Independent Phase 5 lab runs (default 5)\n"
+        << "  --cpu-capability       Detect CPU and run compute-capacity benchmark\n"
+        << "  --compute-seconds N    CPU benchmark duration in seconds (default 1)\n"
         << "  --help                 Show this help\n";
 }
 
@@ -101,6 +104,7 @@ int main(int argc, char* argv[]) {
     int spectre_tries = 999;
     int spectre_lab_runs = 5;
     int phase5_runs = 5;
+    int compute_seconds = 1;
 
     std::size_t buffer_size = 0;
     std::size_t bandwidth_size =
@@ -111,6 +115,7 @@ int main(int argc, char* argv[]) {
     bool run_spectre = false;
     bool run_spectre_lab = false;
     bool run_phase5_lab = false;
+    bool run_cpu_capability = false;
     bool quiet = false;
     bool verbose = false;
     std::string csv_file;
@@ -177,6 +182,13 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Invalid --phase5-runs value\n";
                 return 2;
             }
+        } else if (arg == "--cpu-capability") {
+            run_cpu_capability = true;
+        } else if (arg == "--compute-seconds") {
+            if (!consume_int(argc, argv, i, compute_seconds) || compute_seconds <= 0) {
+                std::cerr << "Invalid --compute-seconds value\n";
+                return 2;
+            }
         } else if (arg == "--spectre-tries") {
             if (!consume_int(argc, argv, i, spectre_tries) || spectre_tries <= 0) {
                 std::cerr << "Invalid --spectre-tries value\n";
@@ -200,9 +212,58 @@ int main(int argc, char* argv[]) {
         (run_shared_memory && shm_iterations <= 0) ||
         spectre_tries <= 0 ||
         (run_spectre_lab && spectre_lab_runs <= 0) ||
-        (run_phase5_lab && phase5_runs <= 0)) {
+        (run_phase5_lab && phase5_runs <= 0) ||
+        (run_cpu_capability && compute_seconds <= 0)) {
         std::cerr << "Invalid numeric configuration\n";
         return 2;
+    }
+
+    if (run_cpu_capability) {
+        const auto capability = CpuCapability::detect();
+        const auto topology = CpuInfo::topology();
+        const auto compute =
+            CpuCapability::benchmark(
+                static_cast<double>(compute_seconds));
+
+        std::cout << "CPU Capability\n"
+                  << "Vendor: " << capability.vendor << '\n'
+                  << "Model: " << capability.brand << '\n'
+                  << "Family/Model/Stepping: "
+                  << capability.family << "/"
+                  << capability.model << "/"
+                  << capability.stepping << '\n'
+                  << "Cores/Threads: "
+                  << topology.physical_cores << "/"
+                  << topology.logical_cpus << '\n'
+                  << "Packages: " << topology.packages << '\n'
+                  << "SMT: "
+                  << (topology.smt_active ? "active" : "inactive")
+                  << '\n'
+                  << "Max frequency: ";
+
+        if (capability.max_frequency_mhz > 0.0) {
+            std::cout << capability.max_frequency_mhz << " MHz\n";
+        } else {
+            std::cout << "unavailable\n";
+        }
+
+        std::cout
+            << "ISA: "
+            << "SSE=" << (capability.sse ? "yes" : "no")
+            << " SSE2=" << (capability.sse2 ? "yes" : "no")
+            << " SSE4.2=" << (capability.sse4_2 ? "yes" : "no")
+            << " AVX=" << (capability.avx ? "yes" : "no")
+            << " AVX2=" << (capability.avx2 ? "yes" : "no")
+            << " AVX-512F=" << (capability.avx512f ? "yes" : "no")
+            << '\n'
+            << "Compute benchmark: " << compute.seconds << " s\n"
+            << "  FP throughput: "
+            << compute.gflops << " GFLOP/s\n"
+            << "  Integer throughput: "
+            << compute.gintops << " GIntOps/s\n"
+            << "\nNote: these are measured single-thread throughput values, not the CPU vendor's theoretical maximum.\n";
+
+        return 0;
     }
 
     if (run_phase5_lab) {

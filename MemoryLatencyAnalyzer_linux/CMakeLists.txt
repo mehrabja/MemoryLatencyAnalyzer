@@ -99,6 +99,47 @@ if(BUILD_TESTING)
     )
 
     add_executable(
+        mlc_integration_test
+        tests/mlc_integration_test.cpp
+        src/mlc_compare.cpp
+        src/platform_utils.cpp
+        src/timer.cpp
+        src/statistics.cpp
+    )
+
+    target_include_directories(
+        mlc_integration_test PRIVATE
+        include
+        config
+    )
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(mlc_integration_test PRIVATE
+            -O2
+            -march=native
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Wshadow
+            -Wconversion
+            -Wsign-conversion
+            -Wformat=2
+            -Wundef
+        )
+    endif()
+
+    add_test(
+        NAME mlc_integration_test
+        COMMAND mlc_integration_test
+    )
+
+    set_tests_properties(
+        mlc_integration_test
+        PROPERTIES
+        SKIP_RETURN_CODE 77
+    )
+
+    add_executable(
         statistics_test
         tests/statistics_test.cpp
         src/statistics.cpp

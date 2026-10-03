@@ -232,6 +232,13 @@ void Reporter::print_bandwidth(
 
     for (const auto& result : results) {
         std::cout
+            << result.allocator
+            << " (" << std::fixed << std::setprecision(2)
+            << (static_cast<double>(result.size_bytes) /
+                (1024.0 * 1024.0))
+            << " MiB)\n"
+            << "  read : " << result.read_gb_s << " GiB/s\n"
+            << "  write: " << result.write_gb_s << " GiB/s\n"
             << "  copy : " << result.copy_gb_s << " GiB/s\n";
 
         if (result.pmu_read) {

@@ -308,9 +308,9 @@ MemoryLatencyAnalyzer/
     ├── config/settings.hpp
     ├── include/
     │   ├── bandwidth_measurer.hpp
-    │   ├── defensive_lab.hpp
     │   ├── cpu_capability.hpp
     │   ├── cpu_info.hpp
+    │   ├── defensive_lab.hpp
     │   ├── latency_measurer.hpp
     │   ├── platform_utils.hpp
     │   ├── reporter.hpp
@@ -320,9 +320,9 @@ MemoryLatencyAnalyzer/
     │   └── timer.hpp
     ├── src/
     │   ├── bandwidth_measurer.cpp
-    │   ├── defensive_lab.cpp
     │   ├── cpu_capability.cpp
     │   ├── cpu_info.cpp
+    │   ├── defensive_lab.cpp
     │   ├── latency_measurer.cpp
     │   ├── main.cpp
     │   ├── platform_utils.cpp
@@ -332,7 +332,6 @@ MemoryLatencyAnalyzer/
     │   ├── statistics.cpp
     │   └── timer.cpp
     └── tests/statistics_test.cpp
-~~~
 
 ---
 

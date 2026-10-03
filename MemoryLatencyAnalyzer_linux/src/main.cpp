@@ -39,6 +39,7 @@ void print_help() {
         << "  --verbose              Include p95/p99/stddev/min/max\n\n"
         << "Other:\n"
         << "  --spectre              Run the self-contained Spectre V1 demo and exit\n"
+        << "  --spectre-tries N      Attempts per leaked byte (default 999)\n"
         << "  --help                 Show this help\n";
 }
 
@@ -155,7 +156,7 @@ int main(int argc, char* argv[]) {
             }
         } else if (arg == "--spectre-tries") {
             if (!consume_int(argc, argv, i, spectre_tries) || spectre_tries <= 0) {
-                std::cerr << "Invalid --spectre-tries value\\n";
+                std::cerr << "Invalid --spectre-tries value\n";
                 return 2;
             }
         } else if (arg == "--csv") {

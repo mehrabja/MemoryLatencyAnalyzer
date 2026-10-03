@@ -510,32 +510,28 @@ Run the same evaluation command on each target CPU/OS environment and keep the r
 ./latency_analyzer --operational-lab --operational-runs 5
 ~~~
 
-در این آزمایشگاه رفتارهای زیر فقط به‌صورت event شبیه‌سازی می‌شوند:
+نسخه فعلی چرخه گسترده‌تری را به‌صورت event شبیه‌سازی می‌کند:
 
-- target access
-- privilege-change attempt
-- persistence attempt
-- defense-evasion indicator
+- initial target access
+- system/process discovery
+- credential-access attempt
+- privilege-escalation attempt
+- scheduled/persistent execution
+- process-injection indicator
+- defense-tamper indicator
 - command-and-control pattern
-- sensitive-data collection
+- lateral-movement attempt
+- sensitive collection
+- archive/collection indicator
 - data staging
 - data transfer / exfiltration
 - cleanup/recovery
 
-خروجی شامل نرخ تشخیص، missed events، false-positive rate و recovery rate است و یک JSON قابل‌پردازش تولید می‌شود.
+هر سناریو در JSON شامل expected control، telemetry source، expected defensive action، detection و recovery است.
 
-مرز مرجع:
+این‌ها **emulation** هستند، نه implementation تکنیک تهاجمی واقعی. state machine فقط در حافظه اجرا می‌شود و هیچ socket، C2، privilege change، persistence، process injection، credential access، external-memory access یا real-data transfer انجام نمی‌دهد.
 
-- state و data فقط در حافظه هستند
-- هیچ socket یا network connection ساخته نمی‌شود
-- persistence واقعی ایجاد نمی‌شود
-- privilege سیستم تغییر نمی‌کند
-- subprocess یا process injection انجام نمی‌شود
-- دسترسی به process یا memory خارجی وجود ندارد
-
-این بخش برای سنجش قرارداد کنترلی و پایداری گزارش‌دهی است؛ عملکرد یک محصول واقعی EDR/DLP/firewall/SIEM را ادعا نمی‌کند.
-
----
+این سناریوها برای ساختن ground truth و ارزیابی قراردادهای کنترلی مناسب‌اند؛ عملکرد یک EDR/DLP/firewall/SIEM واقعی را ادعا نمی‌کنند.
 
 ## CPU capability profiler
 

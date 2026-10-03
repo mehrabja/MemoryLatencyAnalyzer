@@ -7,6 +7,8 @@ struct OperationalScenarioResult {
     std::string name;
     std::string stage;
     std::string expected_control;
+    std::string telemetry_source;
+    std::string expected_action;
     bool detected = false;
     bool recovered = false;
 };
@@ -33,7 +35,7 @@ struct OperationalLabResult {
 class OperationalLab {
 public:
     // Safe end-to-end simulation. It does not create persistence, sockets,
-    // subprocesses, privilege changes, or external-memory access.
+    // subprocesses, privilege changes, external-memory access, or live C2.
     static OperationalLabResult run(
         int runs = 3,
         const std::string& report_path =

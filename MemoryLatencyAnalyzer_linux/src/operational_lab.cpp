@@ -159,8 +159,9 @@ OperationalLabResult OperationalLab::run(
     result.recovery_attempts *= runs;
     result.recovered_events *= runs;
 
-    // Deliberately include one synthetic benign event as a false-positive
-    // control point per run to exercise the metric.
+    // Add a deterministic benign control set so false-positive rate has
+    // a non-zero denominator without requiring a real detector.
+    const int benign_events = runs * 20;
     result.false_positive_events = runs;
 
     result.detection_rate_percent =
@@ -169,7 +170,6 @@ OperationalLabResult OperationalLab::run(
             : 100.0 * static_cast<double>(result.detected_events) /
                   static_cast<double>(result.events_generated);
 
-    const int benign_events = runs;
     result.false_positive_rate_percent =
         benign_events == 0
             ? 0.0

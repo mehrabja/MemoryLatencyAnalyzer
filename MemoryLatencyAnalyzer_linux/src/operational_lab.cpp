@@ -1,7 +1,5 @@
 #include "operational_lab.hpp"
 
-#include <algorithm>
-#include <cstddef>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -14,6 +12,8 @@ struct SyntheticEvent {
     const char* name;
     const char* stage;
     const char* control;
+    const char* telemetry;
+    const char* action;
     bool detectable;
     bool recoverable;
 };
@@ -26,7 +26,7 @@ std::string json_escape(const std::string& value) {
             out << "\\\\";
             break;
         case '"':
-            out << "\\\"";
+            out << "\\"";
             break;
         case '\n':
             out << "\\n";
@@ -47,15 +47,36 @@ std::string json_escape(const std::string& value) {
 
 const std::vector<SyntheticEvent>& scenarios() {
     static const std::vector<SyntheticEvent> value{
-        {"synthetic_target_access", "target_access", "EDR + least privilege", true, true},
-        {"synthetic_privilege_change", "privilege_attempt", "least privilege", true, true},
-        {"synthetic_persistence", "persistence", "persistence monitoring", true, true},
-        {"synthetic_defense_evasion", "evasion", "EDR", true, true},
-        {"synthetic_command_channel", "command_and_control", "network monitoring", true, true},
-        {"synthetic_sensitive_collection", "collection", "DLP + data-flow monitoring", true, true},
-        {"synthetic_data_staging", "staging", "DLP + EDR", true, true},
-        {"synthetic_data_transfer", "exfiltration", "DLP + microsegmentation", true, true},
-        {"synthetic_cleanup", "recovery", "incident response", true, true},
+        {"synthetic_target_access", "initial_access",
+         "EDR + least privilege", "endpoint/resource audit", "alert_or_deny", true, true},
+        {"synthetic_system_discovery", "discovery",
+         "EDR + host telemetry", "process/system inventory", "record_and_alert", true, true},
+        {"synthetic_process_discovery", "discovery",
+         "EDR", "process telemetry", "record_and_alert", true, true},
+        {"synthetic_credential_access", "credential_access",
+         "identity controls + secret access auditing", "authentication/secret-access telemetry", "deny_and_alert", true, true},
+        {"synthetic_privilege_change", "privilege_escalation",
+         "least privilege", "authorization audit", "deny_and_alert", true, true},
+        {"synthetic_scheduled_execution", "persistence",
+         "persistence monitoring", "task/service telemetry", "block_and_alert", true, true},
+        {"synthetic_process_injection", "execution",
+         "EDR process-protection", "process lineage/injection telemetry", "block_and_alert", true, true},
+        {"synthetic_defense_tamper", "defense_evasion",
+         "EDR tamper protection", "security-control telemetry", "prevent_and_alert", true, true},
+        {"synthetic_command_channel", "command_and_control",
+         "network monitoring + microsegmentation", "connection/DNS telemetry", "block_and_alert", true, true},
+        {"synthetic_lateral_movement", "lateral_movement",
+         "microsegmentation + identity policy", "east_west flow/auth telemetry", "deny_and_alert", true, true},
+        {"synthetic_sensitive_collection", "collection",
+         "DLP + data-flow monitoring", "file/data-access telemetry", "alert_and_record", true, true},
+        {"synthetic_archive_collection", "collection",
+         "DLP + EDR", "archive/file-operation telemetry", "inspect_and_alert", true, true},
+        {"synthetic_data_staging", "collection",
+         "DLP + EDR", "staging/temporary-file telemetry", "isolate_and_alert", true, true},
+        {"synthetic_data_transfer", "exfiltration",
+         "DLP + microsegmentation", "egress flow telemetry", "block_and_alert", true, true},
+        {"synthetic_cleanup", "recovery",
+         "incident response", "endpoint recovery telemetry", "recover_and_record", true, true},
     };
     return value;
 }
@@ -70,6 +91,12 @@ bool write_report(
     out << "{\n";
     out << "  \"lab\": \"operational_defensive_simulation\",\n";
     out << "  \"reference_boundary\": \"in_memory_synthetic_state_machine\",\n";
+    out << "  \"live_integration\": false,\n";
+    out << "  \"real_network_activity\": false,\n";
+    out << "  \"real_persistence\": false,\n";
+    out << "  \"real_privilege_change\": false,\n";
+    out << "  \"external_process_access\": false,\n";
+    out << "  \"process_injection\": false,\n";
     out << "  \"runs\": " << result.runs << ",\n";
     out << "  \"events_generated\": " << result.events_generated << ",\n";
     out << "  \"detected_events\": " << result.detected_events << ",\n";
@@ -86,10 +113,6 @@ bool write_report(
         << result.false_positive_rate_percent << ",\n";
     out << "  \"recovery_rate_percent\": "
         << result.recovery_rate_percent << ",\n";
-    out << "  \"real_network_activity\": false,\n";
-    out << "  \"real_persistence\": false,\n";
-    out << "  \"real_privilege_change\": false,\n";
-    out << "  \"external_process_access\": false,\n";
     out << "  \"scenarios\": [\n";
 
     for (std::size_t i = 0; i < result.scenarios.size(); ++i) {
@@ -99,6 +122,10 @@ bool write_report(
         out << "      \"stage\": \"" << json_escape(scenario.stage) << "\",\n";
         out << "      \"expected_control\": \""
             << json_escape(scenario.expected_control) << "\",\n";
+        out << "      \"telemetry_source\": \""
+            << json_escape(scenario.telemetry_source) << "\",\n";
+        out << "      \"expected_action\": \""
+            << json_escape(scenario.expected_action) << "\",\n";
         out << "      \"detected\": "
             << (scenario.detected ? "true" : "false") << ",\n";
         out << "      \"recovered\": "
@@ -135,6 +162,8 @@ OperationalLabResult OperationalLab::run(
         scenario.name = event.name;
         scenario.stage = event.stage;
         scenario.expected_control = event.control;
+        scenario.telemetry_source = event.telemetry;
+        scenario.expected_action = event.action;
         scenario.detected = event.detectable;
         scenario.recovered = event.recoverable;
 
@@ -152,15 +181,13 @@ OperationalLabResult OperationalLab::run(
         result.scenarios.push_back(scenario);
     }
 
-    // The same synthetic control outcomes are replayed for each run in the
-    // aggregate counters; a single scenario catalog is retained for the report.
+    // Aggregate the deterministic synthetic outcomes across independent runs.
     result.detected_events *= runs;
     result.missed_events *= runs;
     result.recovery_attempts *= runs;
     result.recovered_events *= runs;
 
-    // Add a deterministic benign control set so false-positive rate has
-    // a non-zero denominator without requiring a real detector.
+    // Keep a non-zero benign denominator without invoking a real detector.
     const int benign_events = runs * 20;
     result.false_positive_events = runs;
 

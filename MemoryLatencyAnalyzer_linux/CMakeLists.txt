@@ -111,4 +111,29 @@ if(BUILD_TESTING)
         NAME evaluation_test
         COMMAND evaluation_test
     )
+
+    add_executable(
+        operational_lab_test
+        tests/operational_lab_test.cpp
+        src/operational_lab.cpp
+    )
+
+    target_include_directories(
+        operational_lab_test PRIVATE
+        include
+    )
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(operational_lab_test PRIVATE
+            -O2
+            -Wall
+            -Wextra
+            -Wpedantic
+        )
+    endif()
+
+    add_test(
+        NAME operational_lab_test
+        COMMAND operational_lab_test
+    )
 endif()
